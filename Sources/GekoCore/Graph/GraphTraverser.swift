@@ -503,6 +503,15 @@ public class GraphTraverser: GraphTraversing {
             transitiveStaticDependenciesOfDynamicFrameworkDependencies(path: path, name: name)
         )
 
+        let targetGraphDependency = GraphDependency.target(name: name, path: path)
+        if let ignoredDependencies = graph.ignoredDependencies[targetGraphDependency] {
+            deps.subtract(
+                ignoredDependencies.compactMap {
+                    dependencyReference(to: $0, from: targetGraphDependency)
+                }
+            )
+        }
+
         if let target = target(path: path, name: name),
             target.target.product == .unitTests || target.target.product == .uiTests,
             let appHostTarget = unitTestHost(path: path, name: name)
@@ -1559,12 +1568,16 @@ public class GraphTraverser: GraphTraversing {
     ) -> Set<GraphDependencyReference> {
         let targetGraphDependency = GraphDependency.target(name: name, path: path)
         let directDynamicDependencies = graph.dependencies[targetGraphDependency, default: []]
-            .filter(or(isDependencyDynamicLibrary, isDependencyFramework))
-        let transitiveStaticDependencies = directDynamicDependencies.flatMap {
-            transitiveLinkableStaticDependencies(from: $0)
+            .filter {
+                isDependencyDynamicLibrary(dependency: $0)
+                    || isDependencyFramework(dependency: $0)
+                    || $0.isPrecompiledDynamicAndLinkable
+            }
+        let staticDependencies = directDynamicDependencies.flatMap {
+            transitiveStaticDependencies(from: $0)
         }
 
-        return Set(transitiveStaticDependencies.compactMap {
+        return Set(staticDependencies.compactMap {
             dependencyReference(to: $0, from: targetGraphDependency)
         })
     }

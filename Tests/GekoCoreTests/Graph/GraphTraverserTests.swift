@@ -4439,6 +4439,92 @@ final class GraphTraverserTests: GekoUnitTestCase {
         ])
     }
 
+    func test_searchablePathDependencies_includeStaticXCFrameworkBehindCachedDynamicFramework() throws {
+        let consumer = Target.test(name: "Consumer", product: .framework)
+        let project = Project.test(targets: [consumer])
+        let cachedDynamicFramework = GraphDependency.testFramework(
+            path: "/cache/MyTargetSDKLib.framework",
+            binaryPath: "/cache/MyTargetSDKLib.framework/MyTargetSDKLib",
+            linking: .dynamic
+        )
+        let staticXCFramework = GraphDependency.testXCFramework(
+            path: "/checkouts/mytarget-ios-spm/Binary/MyTargetSDK.xcframework",
+            linking: .static
+        )
+        let graph = Graph.test(
+            projects: [project.path: project],
+            targets: [project.path: [consumer.name: consumer]],
+            dependencies: [
+                .target(name: consumer.name, path: project.path): [
+                    cachedDynamicFramework,
+                ],
+                cachedDynamicFramework: [
+                    staticXCFramework,
+                ],
+            ]
+        )
+        let subject = GraphTraverser(graph: graph)
+
+        let searchableDependencies = try subject.searchablePathDependencies(
+            path: project.path,
+            name: consumer.name
+        )
+        let linkableDependencies = try subject.linkableDependencies(
+            path: project.path,
+            name: consumer.name
+        )
+
+        XCTAssertEqual(searchableDependencies, [
+            GraphDependencyReference(cachedDynamicFramework),
+            GraphDependencyReference(staticXCFramework),
+        ])
+        XCTAssertEqual(linkableDependencies, [
+            GraphDependencyReference(cachedDynamicFramework),
+        ])
+    }
+
+    func test_searchablePathDependencies_excludeIgnoredStaticXCFrameworkBehindCachedDynamicFramework() throws {
+        let consumer = Target.test(name: "Consumer", product: .framework)
+        let project = Project.test(targets: [consumer])
+        let consumerDependency = GraphDependency.target(name: consumer.name, path: project.path)
+        let cachedDynamicFramework = GraphDependency.testFramework(
+            path: "/cache/MyTargetSDKLib.framework",
+            binaryPath: "/cache/MyTargetSDKLib.framework/MyTargetSDKLib",
+            linking: .dynamic
+        )
+        let ignoredStaticXCFramework = GraphDependency.testXCFramework(
+            path: "/checkouts/mytarget-ios-spm/Binary/MyTargetSDK.xcframework",
+            linking: .static
+        )
+        let graph = Graph.test(
+            projects: [project.path: project],
+            targets: [project.path: [consumer.name: consumer]],
+            dependencies: [
+                consumerDependency: [
+                    cachedDynamicFramework,
+                ],
+                cachedDynamicFramework: [
+                    ignoredStaticXCFramework,
+                ],
+            ],
+            ignoredDependencies: [
+                consumerDependency: [
+                    ignoredStaticXCFramework,
+                ],
+            ]
+        )
+        let subject = GraphTraverser(graph: graph)
+
+        let searchableDependencies = try subject.searchablePathDependencies(
+            path: project.path,
+            name: consumer.name
+        )
+
+        XCTAssertEqual(searchableDependencies, [
+            GraphDependencyReference(cachedDynamicFramework),
+        ])
+    }
+
     func test_searchablePathDependencies_when_transitivePrecompiledStaticFrameworkLinkedByHostApp() throws {
         // Given
         let hostApp = Target.test(name: "App", product: .app)
