@@ -709,6 +709,63 @@ final class LinkGeneratorTests: XCTestCase {
         XCTAssertEqual(wakaBuildFile?.file, wakaFile)
     }
 
+    func test_generateLinkingPhaseIncludesTransitiveDynamicFrameworks() throws {
+        let projectPath = try AbsolutePath(validating: "/path")
+        let (pbxTarget, target) = createTargets(product: .framework)
+        let project = Project.test(path: projectPath, targets: [target])
+        let imageSource = GraphDependency.testFramework(
+            path: "/ImageSource.framework",
+            binaryPath: "/ImageSource.framework/ImageSource",
+            linking: .dynamic
+        )
+        let alamofireImage = GraphDependency.testFramework(
+            path: "/AlamofireImage.framework",
+            binaryPath: "/AlamofireImage.framework/AlamofireImage",
+            linking: .dynamic
+        )
+        let alamofire = GraphDependency.testFramework(
+            path: "/Alamofire.framework",
+            binaryPath: "/Alamofire.framework/Alamofire",
+            linking: .dynamic
+        )
+        let targetDependency = GraphDependency.target(name: target.name, path: projectPath)
+        let graphTraverser = GraphTraverser(graph: .test(
+            projects: [projectPath: project],
+            targets: [projectPath: [target.name: target]],
+            dependencies: [
+                targetDependency: [imageSource],
+                imageSource: [alamofireImage],
+                alamofireImage: [alamofire],
+            ]
+        ))
+        let pbxproj = PBXProj()
+        let fileElements = ProjectFileElements(enforceExplicitDependencies: false)
+        let imageSourceFile = PBXFileReference(path: "ImageSource.framework")
+        let alamofireImageFile = PBXFileReference(path: "AlamofireImage.framework")
+        let alamofireFile = PBXFileReference(path: "Alamofire.framework")
+        [imageSourceFile, alamofireImageFile, alamofireFile].forEach {
+            pbxproj.add(object: $0)
+        }
+        fileElements.elements["/ImageSource.framework"] = imageSourceFile
+        fileElements.elements["/AlamofireImage.framework"] = alamofireImageFile
+        fileElements.elements["/Alamofire.framework"] = alamofireFile
+
+        try subject.generateLinkingPhase(
+            target: target,
+            pbxTarget: pbxTarget,
+            pbxproj: pbxproj,
+            fileElements: fileElements,
+            path: projectPath,
+            graphTraverser: graphTraverser
+        )
+
+        let files = try XCTUnwrap(pbxTarget.frameworksBuildPhase()?.files)
+        XCTAssertEqual(files.count, 3)
+        XCTAssertTrue(files.contains { $0.file === imageSourceFile })
+        XCTAssertTrue(files.contains { $0.file === alamofireImageFile })
+        XCTAssertTrue(files.contains { $0.file === alamofireFile })
+    }
+
     func test_generateLinkingPhase_requiredProduct() throws {
         var dependencies: Set<GraphDependencyReference> = []
         dependencies.insert(GraphDependencyReference.testFramework(path: "/test.framework"))
