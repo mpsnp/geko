@@ -20,6 +20,8 @@ public class GraphTraverser: GraphTraversing {
 
     private let graph: Graph
     private let linkableDependenciesMetrics = LinkableDependenciesMetrics()
+    private var transitivePrecompiledDynamicDependenciesCache: [GraphDependency: Set<GraphDependency>] = [:]
+    private let transitivePrecompiledDynamicDependenciesLock = NSLock()
 
     private var conditionMapCalculated = false
     private var conditionMap: [GraphDependency: [GraphDependency: PlatformCondition.CombinationResult]] = [:]
@@ -501,6 +503,9 @@ public class GraphTraverser: GraphTraversing {
         deps.formUnion(staticPrecompiledXCFrameworksDependencies(path: path, name: name))
         deps.formUnion(
             transitiveStaticDependenciesOfDynamicFrameworkDependencies(path: path, name: name)
+        )
+        deps.formUnion(
+            transitivePrecompiledDynamicDependenciesOfDynamicTargetDependencies(path: path, name: name)
         )
 
         let targetGraphDependency = GraphDependency.target(name: name, path: path)
@@ -1580,6 +1585,43 @@ public class GraphTraverser: GraphTraversing {
         return Set(staticDependencies.compactMap {
             dependencyReference(to: $0, from: targetGraphDependency)
         })
+    }
+
+    private func transitivePrecompiledDynamicDependenciesOfDynamicTargetDependencies(
+        path: AbsolutePath,
+        name: String
+    ) -> Set<GraphDependencyReference> {
+        let targetGraphDependency = GraphDependency.target(name: name, path: path)
+        let directDynamicTargetDependencies = graph.dependencies[targetGraphDependency, default: []]
+            .filter(isDependencyDynamicTarget)
+        let precompiledDynamicDependencies = directDynamicTargetDependencies.flatMap {
+            transitivePrecompiledDynamicDependencies(from: $0)
+        }
+
+        return Set(precompiledDynamicDependencies.compactMap {
+            dependencyReference(to: $0, from: targetGraphDependency)
+        })
+    }
+
+    private func transitivePrecompiledDynamicDependencies(
+        from dependency: GraphDependency
+    ) -> Set<GraphDependency> {
+        transitivePrecompiledDynamicDependenciesLock.lock()
+        if let cached = transitivePrecompiledDynamicDependenciesCache[dependency] {
+            transitivePrecompiledDynamicDependenciesLock.unlock()
+            return cached
+        }
+        transitivePrecompiledDynamicDependenciesLock.unlock()
+
+        let result = filterDependencies(
+            from: dependency,
+            test: { $0.isPrecompiledDynamicAndLinkable }
+        )
+
+        transitivePrecompiledDynamicDependenciesLock.lock()
+        transitivePrecompiledDynamicDependenciesCache[dependency] = result
+        transitivePrecompiledDynamicDependenciesLock.unlock()
+        return result
     }
 }
 

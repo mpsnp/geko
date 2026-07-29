@@ -4439,6 +4439,58 @@ final class GraphTraverserTests: GekoUnitTestCase {
         ])
     }
 
+    func test_searchablePathDependencies_includeCachedDynamicFrameworkBehindDynamicFrameworkTarget() throws {
+        let consumer = Target.test(name: "Consumer", product: .framework)
+        let interfaces = Target.test(name: "Interfaces", product: .framework)
+        let project = Project.test(targets: [consumer, interfaces])
+        let cachedDynamicFramework = GraphDependency.testFramework(
+            path: "/cache/Lottie.framework",
+            binaryPath: "/cache/Lottie.framework/Lottie",
+            linking: .dynamic
+        )
+        let graph = Graph.test(
+            projects: [project.path: project],
+            targets: [
+                project.path: [
+                    consumer.name: consumer,
+                    interfaces.name: interfaces,
+                ],
+            ],
+            dependencies: [
+                .target(name: consumer.name, path: project.path): [
+                    .target(name: interfaces.name, path: project.path),
+                ],
+                .target(name: interfaces.name, path: project.path): [
+                    cachedDynamicFramework,
+                ],
+            ]
+        )
+        let subject = GraphTraverser(graph: graph)
+
+        let searchableDependencies = try subject.searchablePathDependencies(
+            path: project.path,
+            name: consumer.name
+        )
+        let linkableDependencies = try subject.linkableDependencies(
+            path: project.path,
+            name: consumer.name
+        )
+
+        XCTAssertEqual(searchableDependencies, [
+            .product(
+                target: interfaces.name,
+                productName: interfaces.productNameWithExtension
+            ),
+            GraphDependencyReference(cachedDynamicFramework),
+        ])
+        XCTAssertEqual(linkableDependencies, [
+            .product(
+                target: interfaces.name,
+                productName: interfaces.productNameWithExtension
+            ),
+        ])
+    }
+
     func test_searchablePathDependencies_includeStaticXCFrameworkBehindCachedDynamicFramework() throws {
         let consumer = Target.test(name: "Consumer", product: .framework)
         let project = Project.test(targets: [consumer])
