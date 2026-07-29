@@ -23,6 +23,9 @@ public protocol GraphTraversing {
 
     func warmup()
 
+    /// Logs aggregate performance metrics collected while calculating linkable dependencies.
+    func logLinkableDependenciesMetrics()
+
     /// Returns all the apps from the graph.
     func apps() -> Set<GraphTarget>
 
@@ -280,6 +283,8 @@ public protocol GraphTraversing {
 }
 
 extension GraphTraversing {
+    public func logLinkableDependenciesMetrics() {}
+
     public func apps() -> Set<GraphTarget> {
         targets(product: .app)
     }

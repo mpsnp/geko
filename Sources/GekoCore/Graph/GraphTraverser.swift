@@ -19,6 +19,7 @@ public class GraphTraverser: GraphTraversing {
     }
 
     private let graph: Graph
+    private let linkableDependenciesMetrics = LinkableDependenciesMetrics()
 
     private var conditionMapCalculated = false
     private var conditionMap: [GraphDependency: [GraphDependency: PlatformCondition.CombinationResult]] = [:]
@@ -36,6 +37,12 @@ public class GraphTraverser: GraphTraversing {
             calculateCombinedConditionMap()
             logger.debug("condition map calculation took \(timer.stop())")
         }
+    }
+
+    public func logLinkableDependenciesMetrics() {
+        logger.debug(
+            "Linkable dependencies metrics: \(linkableDependenciesMetrics.snapshot().debugDescription)"
+        )
     }
 
     public func rootTargets() -> Set<GraphTarget> {
@@ -509,6 +516,14 @@ public class GraphTraverser: GraphTraversing {
         name: String,
         shouldExcludeNonLinkableDependencies: Bool
     ) throws -> Set<GraphDependencyReference> {
+        linkableDependenciesMetrics.recordCall()
+        let computationStart = DispatchTime.now().uptimeNanoseconds
+        defer {
+            linkableDependenciesMetrics.recordComputation(
+                durationNanoseconds: DispatchTime.now().uptimeNanoseconds - computationStart
+            )
+        }
+
         guard let target = target(path: path, name: name) else { return Set() }
 
         let targetGraphDependency = GraphDependency.target(name: name, path: path)

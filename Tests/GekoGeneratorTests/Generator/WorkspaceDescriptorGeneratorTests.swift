@@ -87,6 +87,19 @@ final class WorkspaceDescriptorGeneratorTests: GekoUnitTestCase {
         )
     }
 
+    func test_generateLogsProjectDescriptorGenerationDuration() throws {
+        let workspace = Workspace.test(projects: [])
+        let graphTraverser = GraphTraverser(graph: .test(workspace: workspace))
+
+        _ = try subject.generate(graphTraverser: graphTraverser)
+
+        XCTAssertPrinterContains(
+            "Project descriptor generation took:",
+            at: .debug,
+            ==
+        )
+    }
+
     func test_generate_workspaceStructureWithProjects() throws {
         // Given
         let temporaryPath = try temporaryPath()

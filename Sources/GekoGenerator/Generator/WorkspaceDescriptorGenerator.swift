@@ -98,11 +98,19 @@ final class WorkspaceDescriptorGenerator: WorkspaceDescriptorGenerating {
         logger.notice("Generating workspace \(workspaceName)", metadata: .section)
 
         /// Projects
+        let projectGenerationStart = DispatchTime.now().uptimeNanoseconds
         var projects = try Array(graphTraverser.projects.values)
             .sorted(by: { $0.path < $1.path })
             .compactMap(context: config.projectGenerationContext) { project -> ProjectDescriptor in
                 try projectDescriptorGenerator.generate(project: project, graphTraverser: graphTraverser)
             }
+        let projectGenerationNanoseconds =
+            DispatchTime.now().uptimeNanoseconds - projectGenerationStart
+        let projectGenerationSeconds = Double(projectGenerationNanoseconds) / 1_000_000_000
+        logger.debug(
+            "Project descriptor generation took: \(String(format: "%.6f", projectGenerationSeconds))s"
+        )
+        graphTraverser.logLinkableDependenciesMetrics()
 
         logger.info("\nGenerating cross project links", metadata: .subsection)
         try CrossProjectLinkGenerator().generateLinks(

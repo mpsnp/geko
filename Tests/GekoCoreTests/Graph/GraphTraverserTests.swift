@@ -2357,6 +2357,25 @@ final class GraphTraverserTests: GekoUnitTestCase {
         ])
     }
 
+    func test_logLinkableDependenciesMetricsLogsOneAggregateSummary() throws {
+        let target = Target.test(name: "Main")
+        let project = Project.test(targets: [target])
+        let graph = Graph.test(
+            projects: [project.path: project],
+            targets: [project.path: [target.name: target]]
+        )
+        let subject = GraphTraverser(graph: graph)
+
+        _ = try subject.linkableDependencies(path: project.path, name: target.name)
+        subject.logLinkableDependenciesMetrics()
+
+        XCTAssertPrinterContains(
+            "Linkable dependencies metrics: calls=1 computations=1 cacheHits=0",
+            at: .debug,
+            ==
+        )
+    }
+
     func test_linkableAndEmbeddableDependencies_when_appDependensOnPrecompiledStaticBinaryWithPrecompiledDynamicBinaryDependency(
     ) throws {
         // App ---(depends on)---> Precompiled static binary (A) ----> Precompiled dynamic binary (B)
