@@ -2345,6 +2345,7 @@ final class GraphTraverserTests: GekoUnitTestCase {
         // Then
         XCTAssertEqual(got, [
             GraphDependencyReference(dependencyPrecompiledDynamicBinaryA),
+            GraphDependencyReference(dependencyPrecompiledDynamicBinaryB),
         ])
 
         // When
@@ -2354,6 +2355,54 @@ final class GraphTraverserTests: GekoUnitTestCase {
         XCTAssertEqual(embeddable, [
             GraphDependencyReference(dependencyPrecompiledDynamicBinaryA),
             GraphDependencyReference(dependencyPrecompiledDynamicBinaryB),
+        ])
+    }
+
+    func test_linkableDependencies_when_precompiledDynamicBinariesHaveTransitiveDynamicDependencies() throws {
+        let target = Target.test(name: "AutoEnhanceImageModels")
+        let project = Project.test(targets: [target])
+        let alamofire = GraphDependency.testFramework(
+            path: "/test/Alamofire.framework",
+            binaryPath: "/test/Alamofire.framework/Alamofire",
+            dsymPath: nil,
+            bcsymbolmapPaths: [],
+            linking: .dynamic,
+            architectures: [.arm64]
+        )
+        let alamofireImage = GraphDependency.testFramework(
+            path: "/test/AlamofireImage.framework",
+            binaryPath: "/test/AlamofireImage.framework/AlamofireImage",
+            dsymPath: nil,
+            bcsymbolmapPaths: [],
+            linking: .dynamic,
+            architectures: [.arm64]
+        )
+        let imageSource = GraphDependency.testFramework(
+            path: "/test/ImageSource.framework",
+            binaryPath: "/test/ImageSource.framework/ImageSource",
+            dsymPath: nil,
+            bcsymbolmapPaths: [],
+            linking: .dynamic,
+            architectures: [.arm64]
+        )
+        let targetDependency = GraphDependency.target(name: target.name, path: project.path)
+        let graph = Graph.test(
+            projects: [project.path: project],
+            targets: [project.path: [target.name: target]],
+            dependencies: [
+                targetDependency: [imageSource],
+                imageSource: [alamofireImage],
+                alamofireImage: [alamofire],
+            ]
+        )
+        let subject = GraphTraverser(graph: graph)
+
+        let got = try subject.linkableDependencies(path: project.path, name: target.name)
+
+        XCTAssertEqual(got, [
+            GraphDependencyReference(imageSource),
+            GraphDependencyReference(alamofireImage),
+            GraphDependencyReference(alamofire),
         ])
     }
 
@@ -2546,7 +2595,7 @@ final class GraphTraverserTests: GekoUnitTestCase {
         ])
     }
 
-    func test_linkableDependencies_whenDynamicDependencyTransitivelyUsesStaticDependency() throws {
+    func test_linkableDependencies_whenStaticDependencyIsBothDirectAndBehindDynamicDependency() throws {
         // Given
         let app = Target.test(name: "App", product: .app)
         let dynamicFramework = Target.test(name: "DynamicFramework", product: .framework)
@@ -2580,11 +2629,12 @@ final class GraphTraverserTests: GekoUnitTestCase {
 
         // Then
         XCTAssertEqual(got, [
-            .product(target: "DynamicFramework", productName: "DynamicFramework.framework")
+            .product(target: "DynamicFramework", productName: "DynamicFramework.framework"),
+            .product(target: "StaticFramework", productName: "StaticFramework.framework"),
         ])
     }
 
-    func test_linkableDependencies_whenStaticDependencyIsReplacedWithTransitiveDynamicFrameworkWhichLinksThatStaticDependency() throws {
+    func test_linkableDependencies_whenDirectStaticDependenciesAreAlsoLinkedByDynamicFrameworks() throws {
         // Given
         let app = Target.test(name: "App", product: .app)
         let dynamicFramework = Target.test(name: "DynamicFramework", product: .framework)
@@ -2631,6 +2681,8 @@ final class GraphTraverserTests: GekoUnitTestCase {
         XCTAssertEqual(got, [
             .product(target: "DynamicFramework", productName: "DynamicFramework.framework"),
             .product(target: "DynamicFramework2", productName: "DynamicFramework2.framework"),
+            .product(target: "StaticFramework", productName: "StaticFramework.framework"),
+            .product(target: "StaticFramework2", productName: "StaticFramework2.framework"),
         ])
     }
 
@@ -3618,7 +3670,7 @@ final class GraphTraverserTests: GekoUnitTestCase {
         XCTAssertEqual(got, [.product(target: "StaticFramework", productName: "StaticFramework.framework")])
     }
 
-    func test_linkableDependencies_whenUnitTestTargetAndDynamicDependency_withSharedStaticDependency() throws {
+    func test_linkableDependencies_whenUnitTestTargetAndHostDynamicDependencyShareStaticDependency() throws {
         // Given
         let dynamicFramework = Target.test(
             name: "DynamicFramework",
@@ -3662,8 +3714,9 @@ final class GraphTraverserTests: GekoUnitTestCase {
         let got = try subject.linkableDependencies(path: project.path, name: tests.name).sorted()
 
         // Then
-        // static dependency should be replaced with dynamic dependency with incapsulated static dependency
-        XCTAssertEqual(got, [.product(target: "DynamicFramework", productName: "DynamicFramework.framework")])
+        // The host's dynamic dependency is not a direct test dependency. The shared static
+        // dependency remains available to the unit test target.
+        XCTAssertEqual(got, [.product(target: "StaticFramework", productName: "StaticFramework.framework")])
     }
 
     func test_linkableDependencies_whenAppClipHostedTestTarget_withCommonStaticProducts() throws {
@@ -4340,6 +4393,48 @@ final class GraphTraverserTests: GekoUnitTestCase {
             .product(
                 target: staticFramework.name,
                 productName: staticFramework.productNameWithExtension
+            ),
+        ])
+    }
+
+    func test_searchablePathDependencies_includeStaticDependenciesBehindDynamicFrameworkTarget() throws {
+        let consumer = Target.test(name: "Consumer", product: .app)
+        let dynamicFramework = Target.test(name: "DynamicFramework", product: .framework)
+        let staticImplementation = Target.test(name: "StaticImplementation", product: .staticFramework)
+        let project = Project.test(targets: [consumer, dynamicFramework, staticImplementation])
+        let graph = Graph.test(
+            projects: [project.path: project],
+            targets: [
+                project.path: [
+                    consumer.name: consumer,
+                    dynamicFramework.name: dynamicFramework,
+                    staticImplementation.name: staticImplementation,
+                ],
+            ],
+            dependencies: [
+                .target(name: consumer.name, path: project.path): [
+                    .target(name: dynamicFramework.name, path: project.path),
+                ],
+                .target(name: dynamicFramework.name, path: project.path): [
+                    .target(name: staticImplementation.name, path: project.path),
+                ],
+            ]
+        )
+        let subject = GraphTraverser(graph: graph)
+
+        let results = try subject.searchablePathDependencies(
+            path: project.path,
+            name: consumer.name
+        )
+
+        XCTAssertEqual(results, [
+            .product(
+                target: dynamicFramework.name,
+                productName: dynamicFramework.productNameWithExtension
+            ),
+            .product(
+                target: staticImplementation.name,
+                productName: staticImplementation.productNameWithExtension
             ),
         ])
     }
