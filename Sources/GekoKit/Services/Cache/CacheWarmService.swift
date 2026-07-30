@@ -180,11 +180,8 @@ final class CacheWarmService {
         return tasks
     }
     
-    private func cacheOutputType(profile: ProjectDescription.Cache.Profile) -> CacheOutputType {
-        // By default, if we have only 1 platform for cache,
-        // we compile only frameworks since creating xcframework takes a significant amount of time on large projects.
-        // If we need to compile cache for several platforms at once, we must compile xcframeworks
-        return profile.platforms.count > 1 ? .xcframework : .framework
+    private func cacheOutputType(profile _: ProjectDescription.Cache.Profile) -> CacheOutputType {
+        return .xcframework
     }
     
     private func path(_ path: String?) throws -> AbsolutePath {
