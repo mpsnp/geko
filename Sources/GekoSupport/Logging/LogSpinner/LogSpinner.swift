@@ -34,6 +34,7 @@ public final class LogSpinner {
     private let speed: Double
     private let stream: SpinnerStream
     private let ciChecker: CIChecking
+    private let environment: Environmenting
 
     private var message: String
     private var status: Bool
@@ -49,13 +50,15 @@ public final class LogSpinner {
     public init(
         message: String = "",
         animation: SpinnerAnimation = .geko,
-        speed: Double? = nil
+        speed: Double? = nil,
+        environment: Environmenting = Environment.shared
     ) {
         self.animation = animation
         self.message = message
         self.speed = speed ?? animation.defaultSpeed
         self.stream = StdOutSpinnerStream()
         self.ciChecker = CIChecker()
+        self.environment = environment
         self.status = false
         self.frameIndex = 0
 
@@ -66,7 +69,7 @@ public final class LogSpinner {
 
     public func start(message: String = "") {
         self.message = message
-        guard !ciChecker.isCI() && !isDebug else {
+        guard !ciChecker.isCI() && !isDebug && environment.isStandardOutputInteractive else {
             logger.notice(.init(stringLiteral: message))
             return
         }
@@ -83,7 +86,7 @@ public final class LogSpinner {
     }
 
     public func stop() {
-        guard !ciChecker.isCI() && !isDebug else { return }
+        guard !ciChecker.isCI() && !isDebug && environment.isStandardOutputInteractive else { return }
         status = false
         render()
         stream.write(string: "", terminator: "\n")
