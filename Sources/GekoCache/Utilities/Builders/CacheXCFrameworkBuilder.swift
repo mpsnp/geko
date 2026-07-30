@@ -86,12 +86,13 @@ private extension CacheXCFrameworkBuilder {
         outputDirectory: AbsolutePath
     ) throws {
         var xcodeArguments = [XcodeBuildControllerCreateXCFrameworkArgument]()
-        let productName = target.target.name
+        let targetName = target.target.name
+        let productNameWithExtension = target.target.productNameWithExtension
         for platform in platforms {
             let artifactsFoldersNames = "\(CacheConstants.cacheProjectName)-\(platform.caseValue)"
             let frameworkPath = workDirectory.appending(components: [
                 artifactsFoldersNames,
-                "\(productName).framework"
+                productNameWithExtension
             ])
             if FileHandler.shared.exists(frameworkPath) {
                 xcodeArguments.append(.framework(frameworkPath: frameworkPath))
@@ -99,12 +100,12 @@ private extension CacheXCFrameworkBuilder {
         }
         
         guard !xcodeArguments.isEmpty else {
-            throw CacheXCFrameworkBuilderError.frameworksNotFound(targetName: productName)
+            throw CacheXCFrameworkBuilderError.frameworksNotFound(targetName: targetName)
         }
         
         let xcframeworkPath = outputDirectory.appending(components: [
             CacheConstants.xcframeworkOutputFolderName,
-            "\(productName).xcframework"
+            "\(targetName).xcframework"
         ])
         
         try xcodeBuildController.createXCFramework(

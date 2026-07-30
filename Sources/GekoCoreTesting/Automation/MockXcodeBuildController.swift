@@ -91,10 +91,17 @@ final class MockXcodeBuildController: XcodeBuildControlling {
         derivedDataPath _: AbsolutePath?
     ) throws {}
 
+    var invokedCreateXCFramework = false
+    var invokedCreateXCFrameworkArguments: [GekoCore.XcodeBuildControllerCreateXCFrameworkArgument]?
+    var invokedCreateXCFrameworkOutput: AbsolutePath?
     func createXCFramework(
-        arguments _: [GekoCore.XcodeBuildControllerCreateXCFrameworkArgument],
-        output _: AbsolutePath
-    ) throws {}
+        arguments: [GekoCore.XcodeBuildControllerCreateXCFrameworkArgument],
+        output: AbsolutePath
+    ) throws {
+        invokedCreateXCFramework = true
+        invokedCreateXCFrameworkArguments = arguments
+        invokedCreateXCFrameworkOutput = output
+    }
 
     func build(
         _ target: XcodeBuildTarget,

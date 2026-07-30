@@ -34,7 +34,7 @@ final class CacheArtifactStoringTask: CacheArchivingTask {
                         glob = "*/\(target.target.productName).\(context.outputType.productExtension)"
                         artifactPath = context.workDirectory
                     case .xcframework:
-                        glob = "\(target.target.productName).\(context.outputType.productExtension)"
+                        glob = "\(target.target.name).\(context.outputType.productExtension)"
                         artifactPath = context.workDirectory.appending(component: CacheConstants.xcframeworkOutputFolderName)
                     }
                 } else {
