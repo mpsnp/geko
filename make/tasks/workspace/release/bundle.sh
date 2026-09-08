@@ -46,9 +46,14 @@ build_fat_release_binary() {
     (
     cd $ROOT_DIR || exit 1
 
-    xcrun xcodebuild -scheme $1 -configuration Release -destination "generic/platform=macOS" -clonedSourcePackagesDirPath $CLONED_SOURCE_PACKAGES ARCHS='arm64 x86_64' OTHER_LDFLAGS="-rpath @executable_path" BUILD_DIR=$TMP_DIR/$1 -quiet clean build
+    xcrun xcodebuild -scheme $1 -configuration Release -destination "generic/platform=macOS" -clonedSourcePackagesDirPath $CLONED_SOURCE_PACKAGES ARCHS='arm64 x86_64' ENABLE_CODE_COVERAGE=NO OTHER_LDFLAGS="-rpath @executable_path" BUILD_DIR=$TMP_DIR/$1 -quiet clean build
 
     cp -a $TMP_DIR/$1/Release/$1 $BUILD_DIRECTORY/$1
+
+    if xcrun otool -l $BUILD_DIRECTORY/$1 | grep -Eq '__llvm_prf_|__llvm_cov|__LLVM_COV'; then
+        echo "Release binary contains LLVM coverage instrumentation: $BUILD_DIRECTORY/$1" >&2
+        exit 1
+    fi
     )
 }
 

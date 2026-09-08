@@ -12,14 +12,14 @@ import ProjectDescription
 
 final class CacheWarmService {
     // MARK: - Attributes
-    
+
     private let configLoader: ConfigLoading
     private let manifestLoader: ManifestLoading
     private let clock: Clock
     private let timeTakenLoggerFormatter: TimeTakenLoggerFormatting
-    
+
     // MARK: - Init
-    
+
     init(
         configLoader: ConfigLoading = ConfigLoader(manifestLoader: CompiledManifestLoader()),
         manifestLoader: ManifestLoading = CompiledManifestLoader(),
@@ -31,9 +31,9 @@ final class CacheWarmService {
         self.clock = clock
         self.timeTakenLoggerFormatter = timeTakenLoggerFormatter
     }
-    
+
     // MARK: - Public
-    
+
     func run(
         path: String?,
         profile: String?,
@@ -46,7 +46,8 @@ final class CacheWarmService {
         unsafe: Bool,
         dependenciesOnly: Bool,
         noOpen: Bool,
-        ignoreRemoteCache: Bool
+        ignoreRemoteCache: Bool,
+        cacheOnly: Bool = false
     ) async throws {
         let timer = clock.startTimer()
         let path = try self.path(path)
@@ -59,9 +60,10 @@ final class CacheWarmService {
             cacheOutputType: outputType,
             destination: destination,
             ignoreRemoteCache: ignoreRemoteCache,
-            noOpen: noOpen
+            noOpen: noOpen,
+            cacheOnly: cacheOnly
         )
-        
+
         var context = CacheContext(
             path: path,
             config: config,
@@ -75,26 +77,27 @@ final class CacheWarmService {
             dependenciesOnly: dependenciesOnly,
             scheme: scheme
         )
-        
+
         for task in tasks {
             try await task.run(context: &context)
         }
-     
+
         logger.notice(timeTakenLoggerFormatter.timeTakenMessage(for: timer))
     }
-    
+
     // MARK: - Private
-    
-    private func pipelineTasks(
+
+    func pipelineTasks(
         config: Config,
         profile: ProjectDescription.Cache.Profile,
         cacheOutputType: CacheOutputType,
         destination: CacheFrameworkDestination,
         ignoreRemoteCache: Bool,
-        noOpen: Bool
+        noOpen: Bool,
+        cacheOnly: Bool
     ) throws -> [CacheTask] {
         var tasks = [CacheTask]()
-        
+
         let contentHasher = CacheContentHasher()
         let generatorFactory = GeneratorFactory(contentHasher: contentHasher)
         let cacheGraphContentHasher = CacheGraphContentHasher(contentHasher: contentHasher)
@@ -108,14 +111,6 @@ final class CacheWarmService {
             ignoreRemoteCache: ignoreRemoteCache
         ).storages()
         let cache = Cache(storages: storages)
-        let artifactBuilder = CacheFrameworkBuilder(
-            xcodeBuildController: XcodeBuildController(),
-            destination: destination
-        )
-        let xcframeworkBuilder = CacheXCFrameworkBuilder(
-            xcodeBuildController: XcodeBuildController()
-        )
-        
         // Load graph, compute focused modules, prune orphan targets
         tasks.append(
             LoadCacheGraphTask(generatorFactory: generatorFactory)
@@ -132,39 +127,53 @@ final class CacheWarmService {
         tasks.append(
             CacheGraphContentHashingTask(cacheGraphContentHasher: cacheGraphContentHasher)
         )
-        // If enabled, execute swiftmodule cache
-        tasks.append(
-            SwiftModuleCachingTask(contentHasher: contentHasher, cache: cache)
-        )
-        // Mutate cache graph with downloaded prebuild targets and prepare project for cache warmup
-        tasks.append(
-            CacheGraphMutatingTask(
-                state: .beforeWarmup,
-                cache: cache
+        if cacheOnly {
+            // Fetch and safely substitute existing artifacts, preserving sources on misses.
+            // Do not generate a warmup project or invoke framework/swiftmodule builders.
+            tasks.append(CacheGraphMutatingTask(state: .consume, cache: cache))
+        } else {
+            let artifactBuilder = CacheFrameworkBuilder(
+                xcodeBuildController: XcodeBuildController(),
+                destination: destination
             )
-        )
-        // Generate intermediate project without openning it
-        tasks.append(
-            GenerateCacheGraphTask(
-                generatorFactory: generatorFactory,
-                noOpen: true
+            let xcframeworkBuilder = CacheXCFrameworkBuilder(
+                xcodeBuildController: XcodeBuildController()
             )
-        )
-        // Build, prepare artifacts, storing
-        tasks.append(
-            CacheArchivingPipelineTask(
-                cache: cache,
-                artifactBuilder: artifactBuilder,
-                xcframeworkBuilder: xcframeworkBuilder
+
+            // If enabled, execute swiftmodule cache
+            tasks.append(
+                SwiftModuleCachingTask(contentHasher: contentHasher, cache: cache)
             )
-        )
-        // Mutate cache graph with precompiled artifacts and cleanup
-        tasks.append(
-            CacheGraphMutatingTask(
-                state: .afterWarmup,
-                cache: cache
+            // Mutate cache graph with downloaded prebuild targets and prepare project for cache warmup
+            tasks.append(
+                CacheGraphMutatingTask(
+                    state: .beforeWarmup,
+                    cache: cache
+                )
             )
-        )
+            // Generate intermediate project without openning it
+            tasks.append(
+                GenerateCacheGraphTask(
+                    generatorFactory: generatorFactory,
+                    noOpen: true
+                )
+            )
+            // Build, prepare artifacts, storing
+            tasks.append(
+                CacheArchivingPipelineTask(
+                    cache: cache,
+                    artifactBuilder: artifactBuilder,
+                    xcframeworkBuilder: xcframeworkBuilder
+                )
+            )
+            // Mutate cache graph with precompiled artifacts and cleanup
+            tasks.append(
+                CacheGraphMutatingTask(
+                    state: .afterWarmup,
+                    cache: cache
+                )
+            )
+        }
         // Store all cache latests paths. Both frameworks and swiftmodules cache if exist
         tasks.append(
             CacheLatestPathStoringTask(cacheLatestPathStore: cacheLatestPathStore)
@@ -176,14 +185,14 @@ final class CacheWarmService {
                 noOpen: noOpen
             )
         )
-        
+
         return tasks
     }
-    
+
     private func cacheOutputType(profile _: ProjectDescription.Cache.Profile) -> CacheOutputType {
         return .xcframework
     }
-    
+
     private func path(_ path: String?) throws -> AbsolutePath {
         if let path {
             return try AbsolutePath(validating: path, relativeTo: currentPath)
@@ -191,7 +200,7 @@ final class CacheWarmService {
             return currentPath
         }
     }
-    
+
     private var currentPath: AbsolutePath {
         FileHandler.shared.currentPath
     }

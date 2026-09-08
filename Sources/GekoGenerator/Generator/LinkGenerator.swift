@@ -381,6 +381,40 @@ final class LinkGenerator: LinkGenerating {  // swiftlint:disable:this type_body
             pbxTarget: pbxTarget,
             sourceRootPath: sourceRootPath
         )
+
+        if target.canLinkStaticProducts() {
+            try setupSwiftToolchainLinkerSearchPath(pbxTarget: pbxTarget)
+        }
+    }
+
+    private func setupSwiftToolchainLinkerSearchPath(pbxTarget: PBXTarget) throws {
+        guard let configurationList = pbxTarget.buildConfigurationList else {
+            throw LinkGeneratorError.missingConfigurationList(targetName: pbxTarget.name)
+        }
+        let swiftToolchainSearchPath = "-L$(DT_TOOLCHAIN_DIR)/usr/lib/swift/$(PLATFORM_NAME)"
+        for configuration in configurationList.buildConfigurations {
+            let existingFlags = configuration.buildSettings["OTHER_LDFLAGS"]
+            var flags: [String]
+            let containsSwiftToolchainSearchPath: Bool
+            switch existingFlags {
+            case let .array(existing):
+                flags = existing
+                containsSwiftToolchainSearchPath = existing.contains(swiftToolchainSearchPath)
+            case let .string(existing):
+                flags = [existing]
+                containsSwiftToolchainSearchPath = existing
+                    .split(whereSeparator: \.isWhitespace)
+                    .map(String.init)
+                    .contains(swiftToolchainSearchPath)
+            case .none:
+                flags = ["$(inherited)"]
+                containsSwiftToolchainSearchPath = false
+            }
+            if !containsSwiftToolchainSearchPath {
+                flags.append(swiftToolchainSearchPath)
+            }
+            configuration.buildSettings["OTHER_LDFLAGS"] = .array(flags)
+        }
     }
 
     func setupSwiftIncludePaths(

@@ -28,6 +28,18 @@ public struct GenerateCommand: AsyncParsableCommand, HasTrackableParameters {
     var cache: Bool = false
 
     @Flag(
+        name: .customLong("cache-only"),
+        help: "Use available cached artifacts without building missing ones. Cache misses remain source targets."
+    )
+    var cacheOnly: Bool = false
+
+    public func validate() throws {
+        if cache && cacheOnly {
+            throw ValidationError("--cache and --cache-only are mutually exclusive")
+        }
+    }
+
+    @Flag(
         name: [.customLong("ignore-remote-cache")],
         help: "Command will ignore remote cache, and use only local storage instead."
     )
@@ -51,7 +63,7 @@ public struct GenerateCommand: AsyncParsableCommand, HasTrackableParameters {
             .load(options: manifestOptions, path: path)
 
         let fetchService = FetchService()
-        if try await fetchService.needFetch(path: path, cache: cache) {
+        if try await fetchService.needFetch(path: path, cache: cache || cacheOnly) {
             try await fetchService.run(
                 path: path,
                 update: false,
@@ -61,7 +73,7 @@ public struct GenerateCommand: AsyncParsableCommand, HasTrackableParameters {
             )
         }
 
-        if cache {
+        if cache || cacheOnly {
             try await CacheWarmService().run(
                 path: path,
                 profile: options.profile,
@@ -74,7 +86,8 @@ public struct GenerateCommand: AsyncParsableCommand, HasTrackableParameters {
                 unsafe: options.unsafe,
                 dependenciesOnly: options.dependenciesOnly,
                 noOpen: options.noOpen,
-                ignoreRemoteCache: ignoreRemoteCache
+                ignoreRemoteCache: ignoreRemoteCache,
+                cacheOnly: cacheOnly
             )
         } else {
             try await GenerateService().run(
@@ -90,7 +103,8 @@ public struct GenerateCommand: AsyncParsableCommand, HasTrackableParameters {
             [
                 "destination": AnyCodable(options.destination),
                 "focus_targets": AnyCodable(sources.count),
-                "use_cache": AnyCodable(cache),
+                "use_cache": AnyCodable(cache || cacheOnly),
+                "cache_only": AnyCodable(cacheOnly),
                 "ignore_remote_cache": AnyCodable(ignoreRemoteCache),
                 "cacheable_targets": AnyCodable(CacheAnalytics.cacheableTargets),
                 "cacheable_targets_count": AnyCodable(CacheAnalytics.cacheableTargetsCount),

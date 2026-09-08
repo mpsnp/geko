@@ -10,7 +10,7 @@ struct CacheOptions: ParsableArguments {
     You can use regular expressions to get the expected set of modules using quotes: 'Test.*'.\
 
     Combined with entries from `--focus-plan` when both are provided. \
-    If flag `--cache` wasn't passed, command will safely focus on these modules without replacing others with binary counterparts. \
+    If neither `--cache` nor `--cache-only` was passed, command will safely focus on these modules without replacing others with binary counterparts. \
     Optionally works with `--focus-tests` and `scheme`.
     """)
     var sources: [String] = []
@@ -30,7 +30,7 @@ struct CacheOptions: ParsableArguments {
 
     @Option(
         name: [.customShort("P"), .long],
-        help: "The name of the profile to be used when warming up the cache."
+        help: "The name of the profile to use when warming or consuming the cache."
     )
     var profile: String?
 

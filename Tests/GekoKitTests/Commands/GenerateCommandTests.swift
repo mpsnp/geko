@@ -3,6 +3,18 @@ import XCTest
 @testable import GekoKit
 
 final class GenerateCommandTests: XCTestCase {
+    func test_parse_acceptsCacheOnlyWithProfileAndFocus() throws {
+        let command = try GenerateCommand.parse(["--cache-only", "--profile", "Debug", "App"])
+        XCTAssertTrue(command.cacheOnly)
+        XCTAssertFalse(command.cache)
+        XCTAssertEqual(command.options.profile, "Debug")
+        XCTAssertEqual(command.options.sources, ["App"])
+    }
+
+    func test_parse_rejectsCacheOnlyCombinedWithWarmup() {
+        XCTAssertThrowsError(try GenerateCommand.parse(["--cache-only", "--cache"]))
+    }
+
     func test_parse_acceptsFocusPlanOption() throws {
         let command = try GenerateCommand.parse(["--focus-plan", "focus.plan"])
 

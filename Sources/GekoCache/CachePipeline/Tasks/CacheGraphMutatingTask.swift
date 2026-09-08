@@ -7,6 +7,7 @@ public final class CacheGraphMutatingTask: CacheTask {
     public enum State {
         case beforeWarmup
         case afterWarmup
+        case consume
     }
     
     // MARK: - Attributes
@@ -34,7 +35,7 @@ public final class CacheGraphMutatingTask: CacheTask {
         let hashesByCacheableTarget: [String: String]
         let logging: Bool
         switch state {
-        case .beforeWarmup:
+        case .beforeWarmup, .consume:
             hashesByCacheableTarget = context.hashesByCacheableTarget
             logging = true
         case .afterWarmup:
@@ -78,7 +79,7 @@ public final class CacheGraphMutatingTask: CacheTask {
             return CacheProjectDependenciesMapper(
                 cacheProfile: cacheProfile
             )
-        case .afterWarmup:
+        case .afterWarmup, .consume:
             return CleanupCacheProjectGraphMapper()
         }
     }

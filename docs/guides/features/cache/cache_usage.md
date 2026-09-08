@@ -17,6 +17,29 @@ ATests ── A
 Z - orphan
 ```
 
+## Consuming prepared cache without warming
+
+Use this mode for local development when CI prepares the cache:
+
+```bash
+geko generate App --cache-only --profile Debug --no-open
+```
+
+Geko checks local storage and configured remote storage for artifacts matching the current graph and cache profile. Available artifacts replace source targets; missing artifacts remain sources for the next normal Xcode build. This command does not build framework or swiftmodule cache artifacts and does not upload anything.
+
+Focused targets stay as sources, even if their artifacts exist. Safe substitution requires dependencies to be replaceable too: in `App -> A -> B`, a missing B artifact also keeps A as sources. With only B cached, A can stay as sources while B is binary. Storage/network errors fail with a diagnostic and never switch to warming.
+
+`--cache-only` and `--cache` are mutually exclusive. `--profile`, `--dependencies-only`, positional focus and `--focus-plan` are supported. Add `--ignore-remote-cache` to consume only local storage. Generation without either cache flag continues to use source targets.
+
+To prepare the full cache on CI, run:
+
+```bash
+geko generate --cache --profile Debug --no-open
+geko cache upload
+```
+
+Use the same toolchain, profile, destination and source revision for warming and consuming. For verification, use an isolated empty cache directory configured by `Config.cache.path`: consumption must generate sources without the `Building cacheable targets` stage. Then warm a small fixture, consume again and inspect binary references in the generated project. Remove one fixture artifact to exercise partial hits. Do not clear a developer's shared cache for this check.
+
 ## Using only cache flag
 
 ```bash
