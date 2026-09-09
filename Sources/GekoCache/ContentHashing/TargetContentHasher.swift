@@ -37,6 +37,8 @@ public struct TargetContentHashContext {
     public let deploymentTargetHashInfo: String
     public let infoPlistHash: String?
     public let entitlementsHash: String?
+    public let projectSettingsHash: String
+    public let projectSettings: Settings
     public let settingsHash: String?
     public let settings: Settings?
     public let architecture: String?
@@ -184,6 +186,12 @@ public final class TargetContentHasher: TargetContentHashing {
             entitlementsHash = hash
             stringsToHash.append(hash)
         }
+        let projectSettingsHash = try settingsContentHasher.hash(
+            settings: graphTarget.project.settings,
+            cacheProfile: cacheProfile
+        )
+        stringsToHash.append(projectSettingsHash)
+
         var settingsHash: String?
         if let settings = graphTarget.target.settings {
             let hash = try settingsContentHasher.hash(
@@ -227,6 +235,8 @@ public final class TargetContentHasher: TargetContentHashing {
             deploymentTargetHashInfo: deploymentTargetHashInfo,
             infoPlistHash: infoPlistHash,
             entitlementsHash: entitlementsHash,
+            projectSettingsHash: projectSettingsHash,
+            projectSettings: graphTarget.project.settings,
             settingsHash: settingsHash,
             settings: graphTarget.target.settings,
             architecture: architecture,

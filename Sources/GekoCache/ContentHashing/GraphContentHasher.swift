@@ -229,7 +229,9 @@ public final class GraphContentHasher: GraphContentHashing {
             architecture: targetContext.architecture,
             destinations: targetContext.destinations,
             additionalStrings: targetContext.additionalStrings,
-            date: date
+            date: date,
+            projectSettingsHash: targetContext.projectSettingsHash,
+            projectSettings: targetContext.projectSettings
         )
         
         try analytcisHandler.store(targetHashes: targetHashEvent)

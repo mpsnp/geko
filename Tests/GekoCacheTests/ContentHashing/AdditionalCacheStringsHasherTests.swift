@@ -33,7 +33,7 @@ final class AdditionalCacheStringsHasherTests: GekoUnitTestCase {
         let profile = ProjectDescription.Cache.Profile.test(name: "Test")
         mockContentHashing.hashStringsSpy = []
         systeming.swiftlangVersionStub = { "6.0.0" }
-        let expectedHash = "Test;Debug;;true,false,false;framework;simulator;6.0.0;1.0.0-custom;1.5.0"
+        let expectedHash = "Test;Debug;;true,false,false;framework;simulator;6.0.0;1.0.0-custom;1.6.0"
 
         // When
         let hash = try subject.contentHash(

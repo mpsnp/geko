@@ -29,6 +29,8 @@ public struct TargetHashesEvent: Codable, Equatable {
     public let deploymentTargetHashInfo: String
     public let infoPlistHash: String?
     public let entitlementsHash: String?
+    public let projectSettingsHash: String?
+    public let projectSettings: Settings?
     public let settingsHash: String?
     public let settings: Settings?
     public let architecture: String?
@@ -67,7 +69,9 @@ public struct TargetHashesEvent: Codable, Equatable {
         architecture: String?,
         destinations: [String],
         additionalStrings: [String],
-        date: Date
+        date: Date,
+        projectSettingsHash: String? = nil,
+        projectSettings: Settings? = nil
     ) {
         self.name = name
         self.product = product
@@ -94,6 +98,8 @@ public struct TargetHashesEvent: Codable, Equatable {
         self.deploymentTargetHashInfo = deploymentTargetHashInfo
         self.infoPlistHash = infoPlistHash
         self.entitlementsHash = entitlementsHash
+        self.projectSettingsHash = projectSettingsHash
+        self.projectSettings = projectSettings
         self.settingsHash = settingsHash
         self.settings = settings
         self.architecture = architecture

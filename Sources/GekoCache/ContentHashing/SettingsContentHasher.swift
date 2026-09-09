@@ -30,7 +30,13 @@ public final class SettingsContentHasher: SettingsContentHashing {
         let baseSettingsHash = try hash(settings.base)
         let configurationHash = try hash(settings.configurations, cacheProfile: cacheProfile)
         let defaultSettingsHash = try hash(settings.defaultSettings)
-        return try contentHasher.hash([baseSettingsHash, configurationHash, defaultSettingsHash])
+        var hashes = [baseSettingsHash, configurationHash, defaultSettingsHash]
+        if settings.configurations.keys.contains(where: {
+            $0.name == cacheProfile.configuration && $0.variant == .debug
+        }), !settings.baseDebug.isEmpty {
+            hashes.append(try hash(settings.baseDebug))
+        }
+        return try contentHasher.hash(hashes)
     }
 
     private func hash(_ configurations: [BuildConfiguration: ConfigurationSettings?], cacheProfile: ProjectDescription.Cache.Profile) throws -> String {
