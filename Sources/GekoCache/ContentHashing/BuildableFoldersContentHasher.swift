@@ -40,22 +40,27 @@ public final class BuildableFoldersContentHasher: BuildableFoldersContentHashing
     ) {
         var sourceHashes: [String: String] = [:]
         var folderHashes: [String: String] = [:]
+        var relativeFolderHashes: [String: String] = [:]
 
         for folder in buildableFolders.sorted(by: { $0.path < $1.path }) {
-            sourceHashes.removeAll(keepingCapacity: true)
+            var fileHashes: [String: String] = [:]
 
             for file in try fileHandler.filesAndDirectoriesContained(in: folder.path) ?? [] {
-                guard folder.exceptions.contains(where: { $0.isAncestorOfOrEqual(to: file) }) else { continue }
+                guard !fileHandler.isFolder(file),
+                      !folder.exceptions.contains(where: { $0.isAncestorOfOrEqual(to: file) })
+                else { continue }
 
                 let sourceHash = try contentHasher.hash(path: file)
+                fileHashes[file.relative(to: folder.path).pathString] = sourceHash
                 sourceHashes[relativePathConverter.convert(file).pathString] = sourceHash
             }
 
-            let folderHash = try contentHasher.hash(sourceHashes.values.sorted())
+            let folderHash = try contentHasher.hash(fileHashes)
             folderHashes[folder.path.pathString] = folderHash
+            relativeFolderHashes[relativePathConverter.convert(folder.path).pathString] = folderHash
         }
 
-        let finalHash = try contentHasher.hash(folderHashes.values.sorted())
+        let finalHash = try contentHasher.hash(relativeFolderHashes)
         return (finalHash, folderHashes, sourceHashes)
     }
 }

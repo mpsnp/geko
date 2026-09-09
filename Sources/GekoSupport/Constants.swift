@@ -5,7 +5,7 @@ public enum Constants {
     public static let binName = "geko"
     public static let gitRepositoryURL = "https://github.com/geko-tech/geko.git"
     public static let githubAPIURL = "https://api.github.com"
-    public static let version = "1.0.11-patch.3"
+    public static let version = "1.0.11-patch.4"
     public static let projectDescriptionVersion = "release/1.1.0"
     public static let isStage = true
     public static let execSupportMinVersion = "0.6.0"
@@ -27,7 +27,7 @@ public enum Constants {
     /// The cache version.
     /// This should change only when it changes the logic to map a `GekoGraph.Target` to a cached build artifact.
     /// Changing this results in changing the target hash and hence forcing a rebuild of its artifact.
-    public static let cacheVersion = "1.4.0"
+    public static let cacheVersion = "1.5.0"
     public static let cacheLatesBuildFileName = "latest_build"
 
     public enum GekoUserCacheDirectory {

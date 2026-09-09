@@ -81,8 +81,8 @@ final class XCFrameworksContentHasherTests: GekoUnitTestCase {
     func test_xcframeworksHashes_returnsExpectedResult() throws {
         // Given
         let expectedHashes = [
-            filePath1: "63e9c438b0271526", // FooFramework
-            filePath2: "ef0b247da6a747a5", // BarFramework
+            filePath1: "4dd3b57151f8f961", // FooFramework
+            filePath2: "9133f144abd0360f", // BarFramework
         ]
 
         xcframeworkMetadataProvider.swiftModuleFolderPathStub = try temporaryPath()
