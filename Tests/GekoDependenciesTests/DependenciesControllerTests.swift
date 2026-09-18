@@ -37,6 +37,56 @@ final class DependenciesControllerTests: GekoUnitTestCase {
         super.tearDown()
     }
 
+    // MARK: - Need fetch
+
+    func test_needFetch_whenModuleMapIsRemoved() throws {
+        let rootPath = try temporaryPath()
+        let packagePath = rootPath.appending(components: ["Geko", ".build", "checkouts", "Package"])
+        let moduleMapPath = packagePath.appending(component: "module.modulemap")
+        try FileHandler.shared.touch(moduleMapPath)
+        dependenciesGraphController.loadStub = { _ in
+            .test(externalProjects: [packagePath: .test(
+                path: packagePath,
+                sourceRootPath: packagePath,
+                targets: [.test(settings: .test(base: [
+                    "MODULEMAP_FILE": "$(SRCROOT)/module.modulemap"
+                ]))],
+                projectType: .spm
+            )])
+        }
+        swiftPackageManagerInteractor.needFetchResult = false
+
+        XCTAssertFalse(try subject.needFetch(
+            cocoapodsDependencies: nil, packageSettings: .test(), path: rootPath, cache: true
+        ))
+
+        try FileHandler.shared.delete(moduleMapPath)
+
+        XCTAssertTrue(try subject.needFetch(
+            cocoapodsDependencies: nil, packageSettings: .test(), path: rootPath, cache: true
+        ))
+    }
+
+    func test_needFetch_whenGraphIsMissing() throws {
+        dependenciesGraphController.loadStub = { _ in
+            throw DependenciesGraphControllerError.dependenciesWerentFetched
+        }
+        swiftPackageManagerInteractor.needFetchResult = false
+
+        XCTAssertTrue(try subject.needFetch(
+            cocoapodsDependencies: nil, packageSettings: .test(), path: temporaryPath(), cache: true
+        ))
+    }
+
+    func test_needFetch_withoutModuleMaps() throws {
+        dependenciesGraphController.loadStub = { _ in .test(externalProjects: [:]) }
+        swiftPackageManagerInteractor.needFetchResult = false
+
+        XCTAssertFalse(try subject.needFetch(
+            cocoapodsDependencies: nil, packageSettings: .test(), path: temporaryPath(), cache: true
+        ))
+    }
+
     // MARK: - Fetch
 
     func test_fetch_swiftPackageManger() async throws {

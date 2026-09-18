@@ -200,10 +200,43 @@ public final class DependenciesController: DependenciesControlling {
             needFetch = true
         }
 
+        if !needFetch && packageSettings != nil {
+            needFetch = try hasMissingModuleMaps(at: path)
+        }
+
         return needFetch
     }
 
     // MARK: - Helpers
+
+    private func hasMissingModuleMaps(at path: AbsolutePath) throws -> Bool {
+        let graph: GekoGraph.DependenciesGraph
+        do {
+            graph = try dependenciesGraphController.load(at: path)
+        } catch DependenciesGraphControllerError.dependenciesWerentFetched {
+            return true
+        }
+
+        for project in graph.externalProjects.values where project.projectType == .spm {
+            for target in project.targets {
+                guard case let .string(moduleMap) = target.settings?.base["MODULEMAP_FILE"] else {
+                    continue
+                }
+                // Match the path expansion used by ModuleMapMapper during generation.
+                let moduleMapPath = try AbsolutePath(
+                    validating: moduleMap
+                        .replacingOccurrences(of: "$(PROJECT_DIR)", with: project.path.pathString)
+                        .replacingOccurrences(of: "$(SRCROOT)", with: project.path.pathString)
+                        .replacingOccurrences(of: "$(SOURCE_ROOT)", with: project.path.pathString)
+                )
+                if !FileHandler.shared.exists(moduleMapPath) || FileHandler.shared.isFolder(moduleMapPath) {
+                    logger.debug("Module map is missing at \(moduleMapPath.pathString); dependencies need to be fetched.")
+                    return true
+                }
+            }
+        }
+        return false
+    }
 
     private func install(
         at path: AbsolutePath,
