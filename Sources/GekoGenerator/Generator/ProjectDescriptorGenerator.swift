@@ -145,6 +145,15 @@ final class ProjectDescriptorGenerator: ProjectDescriptorGenerating {
             pbxproj: pbxproj,
             fileElements: fileElements
         )
+        let xcframeworkSettings = fileElements.xcframeworkBuildSettings.toBuildSettings()
+        for configuration in configurationList.buildConfigurations {
+            for key in xcframeworkSettings.keys.sorted() {
+                if let existing = configuration.buildSettings[key], existing != xcframeworkSettings[key] {
+                    throw XCFrameworkReferenceError.conflictingBuildSetting(key)
+                }
+                configuration.buildSettings[key] = xcframeworkSettings[key]
+            }
+        }
         let pbxProject = try generatePbxproject(
             project: project,
             projectFileElements: fileElements,

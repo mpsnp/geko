@@ -16,6 +16,8 @@ public struct XCFrameworkInfoPlist: Codable, Hashable, Equatable {
             case mergeable = "MergeableMetadata"
             case platform = "SupportedPlatform"
             case platformVariant = "SupportedPlatformVariant"
+            case debugSymbolsPath = "DebugSymbolsPath"
+            case bitcodeSymbolMapsPath = "BitcodeSymbolMapsPath"
         }
 
         /// It represents the library's platform.
@@ -51,6 +53,8 @@ public struct XCFrameworkInfoPlist: Codable, Hashable, Equatable {
 
         public let platform: Platform
         public let platformVariant: PlatformVariant?
+        public let debugSymbolsPath: RelativePath?
+        public let bitcodeSymbolMapsPath: RelativePath?
 
         public func encode(to encoder: Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
@@ -60,6 +64,8 @@ public struct XCFrameworkInfoPlist: Codable, Hashable, Equatable {
             try container.encode(architectures, forKey: .architectures)
             try container.encode(platform, forKey: .platform)
             try container.encodeIfPresent(platformVariant, forKey: .platformVariant)
+            try container.encodeIfPresent(debugSymbolsPath, forKey: .debugSymbolsPath)
+            try container.encodeIfPresent(bitcodeSymbolMapsPath, forKey: .bitcodeSymbolMapsPath)
         }
 
         public init(
@@ -68,7 +74,9 @@ public struct XCFrameworkInfoPlist: Codable, Hashable, Equatable {
             mergeable: Bool,
             architectures: [BinaryArchitecture],
             platform: Platform,
-            platformVariant: PlatformVariant?
+            platformVariant: PlatformVariant?,
+            debugSymbolsPath: RelativePath? = nil,
+            bitcodeSymbolMapsPath: RelativePath? = nil
         ) {
             self.identifier = identifier
             self.path = path
@@ -76,6 +84,8 @@ public struct XCFrameworkInfoPlist: Codable, Hashable, Equatable {
             self.architectures = architectures
             self.platform = platform
             self.platformVariant = platformVariant
+            self.debugSymbolsPath = debugSymbolsPath
+            self.bitcodeSymbolMapsPath = bitcodeSymbolMapsPath
         }
 
         public init(from decoder: Decoder) throws {
@@ -86,6 +96,8 @@ public struct XCFrameworkInfoPlist: Codable, Hashable, Equatable {
             mergeable = try container.decodeIfPresent(Bool.self, forKey: .mergeable) ?? false
             platform = try container.decode(Platform.self, forKey: .platform)
             platformVariant = try container.decodeIfPresent(PlatformVariant.self, forKey: .platformVariant)
+            debugSymbolsPath = try container.decodeIfPresent(RelativePath.self, forKey: .debugSymbolsPath)
+            bitcodeSymbolMapsPath = try container.decodeIfPresent(RelativePath.self, forKey: .bitcodeSymbolMapsPath)
         }
     }
 

@@ -1,3 +1,8 @@
+## Geko 1.0.11-patch.7
+• [patch] Select native XCFramework slices by SDK, architecture, and platform variant without ProcessXCFramework tasks.
+• [patch] Share framework search paths and cache graph traversal results during parallel project generation.
+• [patch] Copy selected XCFramework debug symbols and bitcode symbol maps.
+
 ## Geko 1.1.0
 Geko [patch] Fixed extra focus on test modules of runnable target (#110)
 Geko [patch] Add logs for swiftmodule caching task (#109)

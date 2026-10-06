@@ -276,9 +276,10 @@ final class LinkGeneratorTests: XCTestCase {
     func test_generateEmbedPhase_setupEmbedFrameworksBuildPhase_whenXCFrameworkIsPresent() throws {
         // Given
         var dependencies: Set<GraphDependencyReference> = []
-        dependencies.insert(GraphDependencyReference.testXCFramework(path: "/Frameworks/Test.xcframework"))
+        dependencies.insert(GraphDependencyReference.testXCFramework(path: "/Frameworks/Test.xcframework", condition: .when([.ios])))
         let pbxproj = PBXProj()
-        let (pbxTarget, target) = createTargets(product: .framework)
+        let pbxTarget = PBXNativeTarget(name: "Test")
+        let target = Target.test(name: "Test", destinations: [.iPhone, .mac], product: .framework)
         let sourceRootPath = try AbsolutePath(validating: "/")
 
         let group = PBXGroup()
@@ -286,6 +287,13 @@ final class LinkGeneratorTests: XCTestCase {
 
         let fileAbsolutePath = try AbsolutePath(validating: "/Frameworks/Test.xcframework")
         let fileElements = createFileElements(fileAbsolutePath: fileAbsolutePath)
+        let nativeReference = PBXFileReference(
+            sourceTree: .absolute,
+            name: "Test.framework",
+            lastKnownFileType: "wrapper.framework",
+            path: "$(GEKO_XCFRAMEWORK_TEST)"
+        )
+        fileElements.elements[fileAbsolutePath] = nativeReference
         let path = try AbsolutePath(validating: "/path/")
         let graphTraverser = MockGraphTraverser()
         graphTraverser.stubbedEmbeddableFrameworksResult = dependencies
@@ -305,7 +313,10 @@ final class LinkGeneratorTests: XCTestCase {
         let copyBuildPhase = try XCTUnwrap(pbxTarget.embedFrameworksBuildPhases().first)
         XCTAssertEqual(copyBuildPhase.name, "Embed Frameworks")
         let buildFiles = try XCTUnwrap(copyBuildPhase.files)
-        XCTAssertEqual(buildFiles.map { $0.file?.path }, ["Test.xcframework"])
+        XCTAssertEqual(buildFiles.map(\.file), [nativeReference])
+        XCTAssertEqual(buildFiles.map { $0.file?.path }, ["$(GEKO_XCFRAMEWORK_TEST)"])
+        XCTAssertEqual(buildFiles.map(\.platformFilter), ["ios"])
+        XCTAssertEqual(pbxTarget.buildPhases.count, 1)
         XCTAssertEqual(buildFiles.map(\.settings), [
             ["ATTRIBUTES": ["CodeSignOnCopy", "RemoveHeadersOnCopy"]],
         ])
@@ -348,7 +359,7 @@ final class LinkGeneratorTests: XCTestCase {
         // Given
         let dependencies = [
             GraphDependencyReference.testFramework(path: "/path/Dependencies/Frameworks/A.framework"),
-            GraphDependencyReference.testFramework(path: "/path/Dependencies/Frameworks/B.framework"),
+            GraphDependencyReference.testFramework(path: "/path/OtherArtifacts/B.framework"),
             GraphDependencyReference.testLibrary(path: "/path/Dependencies/Libraries/libC.a"),
             GraphDependencyReference.testLibrary(path: "/path/Dependencies/Libraries/libD.a"),
             GraphDependencyReference.testXCFramework(path: "/path/Dependencies/XCFrameworks/E.xcframework"),
@@ -370,7 +381,8 @@ final class LinkGeneratorTests: XCTestCase {
             pbxTarget: xcodeprojElements.pbxTarget,
             sourceRootPath: sourceRootPath,
             path: path,
-            searchablePathDependencies: graphTraverser.searchablePathDependencies(path: path, name: target.name).sorted()
+            searchablePathDependencies: graphTraverser.searchablePathDependencies(path: path, name: target.name).sorted(),
+            sharedRoot: FrameworkSearchPathsGenerator.rootPath(workspacePath: path)
         )
 
         // Then
@@ -379,9 +391,8 @@ final class LinkGeneratorTests: XCTestCase {
             "$(inherited)",
             "my/custom/path",
             "$(PLATFORM_DIR)/Developer/Library/Frameworks",
-            "$(SRCROOT)/Dependencies/Frameworks",
+            "$(SRCROOT)/.geko/FrameworkSearchPaths",
             "$(SRCROOT)/Dependencies/Libraries",
-            "$(SRCROOT)/Dependencies/XCFrameworks",
         ])
     }
 
@@ -401,14 +412,14 @@ final class LinkGeneratorTests: XCTestCase {
                 infoPlist: .test(libraries: [
                     .test(
                         identifier: "ios-arm64",
-                        path: try! RelativePath(validating: "E.framework"),
+                        path: try! RelativePath(validating: "E.framework/E"),
                         mergeable: false,
                         architectures: [.arm64],
                         platform: .ios
                     ),
                     .test(
                         identifier: "ios-arm64_x86_64-simulator",
-                        path: try! RelativePath(validating: "E.framework"),
+                        path: try! RelativePath(validating: "E.framework/E"),
                         mergeable: false,
                         architectures: [.arm64, .x8664],
                         platform: .ios,
@@ -417,10 +428,36 @@ final class LinkGeneratorTests: XCTestCase {
                 ]),
                 linking: .static
             ),
+            GraphDependencyReference.testXCFramework(
+                path: "/path/OtherArtifacts/F.xcframework",
+                infoPlist: .test(libraries: [
+                    .test(
+                        identifier: "ios-arm64",
+                        path: try! RelativePath(validating: "F.framework/F"),
+                        architectures: [.arm64],
+                        platform: .ios
+                    ),
+                ])
+            ),
+            GraphDependencyReference.testXCFramework(
+                path: "/path/Dependencies/Libraries/G.xcframework",
+                infoPlist: .test(libraries: [
+                    .test(
+                        identifier: "ios-arm64",
+                        path: try! RelativePath(validating: "libG.a"),
+                        architectures: [.arm64],
+                        platform: .ios
+                    ),
+                ]),
+                linking: .static
+            ),
         ]
         let sourceRootPath = try AbsolutePath(validating: "/path")
         let xcodeprojElements = createXcodeprojElements()
         xcodeprojElements.config.buildSettings["FRAMEWORK_SEARCH_PATHS"] = "my/custom/path"
+        xcodeprojElements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]"] = "my/device/path"
+        xcodeprojElements.config.buildSettings["LIBRARY_SEARCH_PATHS[sdk=iphoneos*]"] = "my/library/path"
+        xcodeprojElements.config.buildSettings["SWIFT_INCLUDE_PATHS[sdk=iphoneos*]"] = "my/swift/path"
         let target = Target.test()
         let path = try AbsolutePath(validating: "/path/")
         let graphTraverser = MockGraphTraverser()
@@ -432,19 +469,223 @@ final class LinkGeneratorTests: XCTestCase {
             pbxTarget: xcodeprojElements.pbxTarget,
             sourceRootPath: sourceRootPath,
             path: path,
-            searchablePathDependencies: graphTraverser.searchablePathDependencies(path: path, name: target.name).sorted()
+            searchablePathDependencies: graphTraverser.searchablePathDependencies(path: path, name: target.name).sorted(),
+            sharedRoot: FrameworkSearchPathsGenerator.rootPath(workspacePath: path)
         )
 
         // Then
         let config = xcodeprojElements.config
         XCTAssertEqual(config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=iphoneos*]"]?.arrayValue, [
             "$(inherited)",
-            "$(SRCROOT)/Dependencies/XCFrameworks/E.xcframework/ios-arm64",
+            "my/device/path",
+            "$(SRCROOT)/.geko/FrameworkSearchPaths/iphoneos",
         ])
         XCTAssertEqual(config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]"]?.arrayValue, [
             "$(inherited)",
-            "$(SRCROOT)/Dependencies/XCFrameworks/E.xcframework/ios-arm64_x86_64-simulator",
+            "$(SRCROOT)/.geko/FrameworkSearchPaths/iphonesimulator",
         ])
+        XCTAssertEqual(config.buildSettings["FRAMEWORK_SEARCH_PATHS"], "my/custom/path")
+        XCTAssertEqual(config.buildSettings["LIBRARY_SEARCH_PATHS[sdk=iphoneos*]"]?.arrayValue, [
+            "$(inherited)",
+            "my/library/path",
+            "$(SRCROOT)/Dependencies/Libraries/G.xcframework/ios-arm64",
+        ])
+        XCTAssertEqual(config.buildSettings["SWIFT_INCLUDE_PATHS[sdk=iphoneos*]"]?.arrayValue, [
+            "$(inherited)",
+            "my/swift/path",
+            "$(SRCROOT)/Dependencies/Libraries/G.xcframework/ios-arm64",
+        ])
+    }
+
+    func test_setupPlatformDependentSearchPath_selectsCatalystWithoutMacOSShadowing() throws {
+        let dependencies = [GraphDependencyReference.testXCFramework(
+            path: "/path/Bundle.xcframework",
+            infoPlist: .test(libraries: [
+                .test(identifier: "mac", path: try RelativePath(validating: "Product.framework"), platform: .macos),
+                .test(identifier: "catalyst", path: try RelativePath(validating: "Product.framework/Product"),
+                      platform: .ios, platformVariant: .maccatalyst),
+            ])
+        )]
+        let elements = createXcodeprojElements()
+        elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS"] = "my/common/path"
+        elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=macosx*]"] = "my/mac/path"
+
+        try setupSliceSearchPaths(dependencies, elements: elements)
+
+        XCTAssertEqual(elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS"], "my/common/path")
+        XCTAssertEqual(elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=macosx*]"]?.arrayValue, [
+            "$(inherited)", "my/mac/path", "$(GEKO_FRAMEWORK_SEARCH_PATHS_MACOS_$(IS_MACCATALYST))",
+        ])
+        XCTAssertEqual(elements.config.buildSettings["GEKO_FRAMEWORK_SEARCH_PATHS_MACOS_NO"]?.arrayValue, [
+            "$(SRCROOT)/.geko/FrameworkSearchPaths/macosx",
+        ])
+        XCTAssertEqual(elements.config.buildSettings["GEKO_FRAMEWORK_SEARCH_PATHS_MACOS_YES"]?.arrayValue, [
+            "$(SRCROOT)/.geko/FrameworkSearchPaths/maccatalyst",
+        ])
+        XCTAssertNil(elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=maccatalyst*]"])
+    }
+
+    func test_setupPlatformDependentSearchPath_preservesPureMacOSPaths() throws {
+        let dependencies = [GraphDependencyReference.testXCFramework(
+            path: "/path/Bundle.xcframework",
+            infoPlist: .test(libraries: [
+                .test(identifier: "mac", path: try RelativePath(validating: "Product.framework"), platform: .macos),
+            ])
+        )]
+        let elements = createXcodeprojElements()
+        elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=macosx*]"] = "my/mac/path"
+
+        try setupSliceSearchPaths(dependencies, elements: elements)
+
+        XCTAssertEqual(elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=macosx*]"]?.arrayValue, [
+            "$(inherited)", "my/mac/path", "$(SRCROOT)/.geko/FrameworkSearchPaths/macosx",
+        ])
+        XCTAssertNil(elements.config.buildSettings["GEKO_FRAMEWORK_SEARCH_PATHS_MACOS_NO"])
+    }
+
+    func test_setupPlatformDependentSearchPath_preservesCatalystArchiveSearchAndSwiftImports() throws {
+        let dependencies = [GraphDependencyReference.testXCFramework(
+            path: "/path/Bundle.xcframework",
+            infoPlist: .test(libraries: [
+                .test(identifier: "mac", path: try RelativePath(validating: "libProduct.a"), platform: .macos),
+                .test(identifier: "catalyst", path: try RelativePath(validating: "libProduct.a"),
+                      platform: .ios, platformVariant: .maccatalyst),
+            ]),
+            linking: .static
+        )]
+        let elements = createXcodeprojElements()
+        for setting in ["LIBRARY_SEARCH_PATHS", "SWIFT_INCLUDE_PATHS"] {
+            elements.config.buildSettings["\(setting)[sdk=macosx*]"] = "my/custom/path"
+        }
+
+        try setupSliceSearchPaths(dependencies, elements: elements)
+
+        for setting in ["LIBRARY_SEARCH_PATHS", "SWIFT_INCLUDE_PATHS"] {
+            XCTAssertEqual(elements.config.buildSettings["\(setting)[sdk=macosx*]"]?.arrayValue, [
+                "$(inherited)", "my/custom/path", "$(GEKO_\(setting)_MACOS_$(IS_MACCATALYST))",
+            ])
+            XCTAssertEqual(elements.config.buildSettings["GEKO_\(setting)_MACOS_NO"]?.arrayValue, [
+                "$(SRCROOT)/Bundle.xcframework/mac",
+            ])
+            XCTAssertEqual(elements.config.buildSettings["GEKO_\(setting)_MACOS_YES"]?.arrayValue, [
+                "$(SRCROOT)/Bundle.xcframework/catalyst",
+            ])
+        }
+        XCTAssertNil(elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=macosx*]"])
+    }
+
+    func test_setupPlatformDependentSearchPath_selectsDisjointArchitectureFrameworkImports() throws {
+        let dependencies = [GraphDependencyReference.testXCFramework(
+            path: "/path/Bundle.xcframework",
+            infoPlist: .test(libraries: [
+                .test(identifier: "arm", path: try RelativePath(validating: "Product.framework"),
+                      architectures: [.arm64], platform: .ios, platformVariant: .simulator),
+                .test(identifier: "intel", path: try RelativePath(validating: "Product.framework"),
+                      architectures: [.x8664], platform: .ios, platformVariant: .simulator),
+            ])
+        )]
+        let elements = createXcodeprojElements()
+        elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*]"] = "my/sdk/path"
+        elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=arm64]"] = "my/arm/path"
+
+        try setupSliceSearchPaths(dependencies, elements: elements)
+
+        for arch in ["arm64", "x86_64"] {
+            let actual = try XCTUnwrap(elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS[sdk=iphonesimulator*][arch=\(arch)]"]?.arrayValue)
+            var expected: Set<String> = [
+                "$(inherited)", "my/sdk/path", "$(SRCROOT)/.geko/FrameworkSearchPaths/iphonesimulator",
+                "$(SRCROOT)/.geko/FrameworkSearchPaths/iphonesimulator/\(arch)",
+            ]
+            if arch == "arm64" { expected.insert("my/arm/path") }
+            XCTAssertEqual(Set(actual), expected)
+        }
+    }
+
+    func test_setupPlatformDependentSearchPath_selectsCatalystArchitectureWithoutMacOSSlice() throws {
+        let dependencies = [GraphDependencyReference.testXCFramework(
+            path: "/path/Bundle.xcframework",
+            infoPlist: .test(libraries: [
+                .test(identifier: "mac", path: try RelativePath(validating: "Product.framework"), platform: .macos),
+                .test(identifier: "arm", path: try RelativePath(validating: "Product.framework"),
+                      architectures: [.arm64], platform: .ios, platformVariant: .maccatalyst),
+                .test(identifier: "intel", path: try RelativePath(validating: "Product.framework"),
+                      architectures: [.x8664], platform: .ios, platformVariant: .maccatalyst),
+            ])
+        )]
+        let elements = createXcodeprojElements()
+
+        try setupSliceSearchPaths(dependencies, elements: elements)
+
+        for arch in ["arm64", "x86_64"] {
+            let condition = "[sdk=macosx*][arch=\(arch)]"
+            XCTAssertEqual(elements.config.buildSettings["FRAMEWORK_SEARCH_PATHS\(condition)"]?.arrayValue, [
+                "$(inherited)", "$(GEKO_FRAMEWORK_SEARCH_PATHS_MACOS_$(IS_MACCATALYST))",
+            ])
+            XCTAssertEqual(elements.config.buildSettings["GEKO_FRAMEWORK_SEARCH_PATHS_MACOS_YES\(condition)"]?.arrayValue, [
+                "$(SRCROOT)/.geko/FrameworkSearchPaths/maccatalyst",
+                "$(SRCROOT)/.geko/FrameworkSearchPaths/maccatalyst/\(arch)",
+            ])
+            XCTAssertEqual(elements.config.buildSettings["GEKO_FRAMEWORK_SEARCH_PATHS_MACOS_NO\(condition)"]?.arrayValue, [
+                "$(SRCROOT)/.geko/FrameworkSearchPaths/macosx",
+            ])
+        }
+    }
+
+    func test_setupPlatformDependentSearchPath_selectsDisjointArchitectureArchives() throws {
+        let dependencies = [GraphDependencyReference.testXCFramework(
+            path: "/path/Bundle.xcframework",
+            infoPlist: .test(libraries: [
+                .test(identifier: "arm", path: try RelativePath(validating: "libProduct.a"),
+                      architectures: [.arm64], platform: .ios, platformVariant: .simulator),
+                .test(identifier: "intel", path: try RelativePath(validating: "libProduct.a"),
+                      architectures: [.x8664], platform: .ios, platformVariant: .simulator),
+            ]),
+            linking: .static
+        )]
+        let elements = createXcodeprojElements()
+
+        try setupSliceSearchPaths(dependencies, elements: elements)
+
+        for setting in ["LIBRARY_SEARCH_PATHS", "SWIFT_INCLUDE_PATHS"] {
+            for (arch, identifier) in [("arm64", "arm"), ("x86_64", "intel")] {
+                XCTAssertEqual(elements.config.buildSettings["\(setting)[sdk=iphonesimulator*][arch=\(arch)]"]?.arrayValue, [
+                    "$(inherited)", "$(SRCROOT)/Bundle.xcframework/\(identifier)",
+                ])
+            }
+            XCTAssertNil(elements.config.buildSettings["\(setting)[sdk=iphonesimulator*]"])
+        }
+    }
+
+    func test_setupPlatformDependentSearchPath_selectsCatalystArchitectureArchives() throws {
+        let dependencies = [GraphDependencyReference.testXCFramework(
+            path: "/path/Bundle.xcframework",
+            infoPlist: .test(libraries: [
+                .test(identifier: "mac", path: try RelativePath(validating: "libProduct.a"), platform: .macos),
+                .test(identifier: "arm", path: try RelativePath(validating: "libProduct.a"),
+                      architectures: [.arm64], platform: .ios, platformVariant: .maccatalyst),
+                .test(identifier: "intel", path: try RelativePath(validating: "libProduct.a"),
+                      architectures: [.x8664], platform: .ios, platformVariant: .maccatalyst),
+            ]),
+            linking: .static
+        )]
+        let elements = createXcodeprojElements()
+
+        try setupSliceSearchPaths(dependencies, elements: elements)
+
+        for setting in ["LIBRARY_SEARCH_PATHS", "SWIFT_INCLUDE_PATHS"] {
+            for (arch, identifier) in [("arm64", "arm"), ("x86_64", "intel")] {
+                let condition = "[sdk=macosx*][arch=\(arch)]"
+                XCTAssertEqual(elements.config.buildSettings["\(setting)\(condition)"]?.arrayValue, [
+                    "$(inherited)", "$(GEKO_\(setting)_MACOS_$(IS_MACCATALYST))",
+                ])
+                XCTAssertEqual(elements.config.buildSettings["GEKO_\(setting)_MACOS_YES\(condition)"]?.arrayValue, [
+                    "$(SRCROOT)/Bundle.xcframework/\(identifier)",
+                ])
+                XCTAssertEqual(elements.config.buildSettings["GEKO_\(setting)_MACOS_NO\(condition)"]?.arrayValue, [
+                    "$(SRCROOT)/Bundle.xcframework/mac",
+                ])
+            }
+        }
     }
 
     func test_setupHeadersSearchPath() throws {
@@ -1148,6 +1389,76 @@ final class LinkGeneratorTests: XCTestCase {
         XCTAssertTrue(
             buildPhase?.outputPaths
                 .contains("$BUILD_DIR/Debug-iphoneos/\(macroExecutable.productName)") == true
+        )
+    }
+
+    func test_generateLinkingPhase_nativeXCFrameworkReferencesPreserveStatusAndCondition() throws {
+        let container: AbsolutePath = "/Frameworks/Product.xcframework"
+        let disabled: AbsolutePath = "/Frameworks/Disabled.xcframework"
+        let dependency = GraphDependencyReference.testXCFramework(path: container, status: .optional, condition: .when([.ios]))
+        let graphTraverser = MockGraphTraverser()
+        graphTraverser.stubbedLinkableDependenciesResult = [
+            dependency, .testXCFramework(path: disabled, status: .none),
+        ]
+        let pbxTarget = PBXNativeTarget(name: "Consumer")
+        let target = Target.test(name: "Consumer", destinations: [.iPhone, .mac], product: .app)
+        let pbxproj = PBXProj()
+        let nativeReference = PBXFileReference(
+            sourceTree: .absolute,
+            name: "Product.framework",
+            lastKnownFileType: "wrapper.framework",
+            path: "$(GEKO_XCFRAMEWORK_PRODUCT)"
+        )
+        let fileElements = ProjectFileElements(enforceExplicitDependencies: false)
+        fileElements.elements[container] = nativeReference
+
+        try subject.generateLinkingPhase(
+            target: target, pbxTarget: pbxTarget, pbxproj: pbxproj, fileElements: fileElements,
+            path: "/path", graphTraverser: graphTraverser
+        )
+
+        let phase = try XCTUnwrap(pbxTarget.buildPhases.first as? PBXFrameworksBuildPhase)
+        let files = try XCTUnwrap(phase.files)
+        XCTAssertEqual(files.map(\.file), [nativeReference])
+        XCTAssertEqual(files.map(\.settings), [["ATTRIBUTES": ["Weak"]]])
+        XCTAssertEqual(files.map(\.platformFilter), ["ios"])
+        XCTAssertEqual(pbxTarget.buildPhases.count, 1)
+    }
+
+    func test_generateLinkingPhase_nativeXCFrameworkArchiveConsumesContainerLogicalKey() throws {
+        let container: AbsolutePath = "/Frameworks/Product.xcframework"
+        let graphTraverser = MockGraphTraverser()
+        graphTraverser.stubbedLinkableDependenciesResult = [.testXCFramework(path: container, linking: .static)]
+        let pbxTarget = PBXNativeTarget(name: "Consumer")
+        let target = Target.test(name: "Consumer", product: .staticFramework)
+        let pbxproj = PBXProj()
+        let nativeReference = PBXFileReference(
+            sourceTree: .absolute,
+            name: "libProduct.a",
+            lastKnownFileType: "archive.ar",
+            path: "$(GEKO_XCFRAMEWORK_PRODUCT)"
+        )
+        let fileElements = ProjectFileElements(enforceExplicitDependencies: false)
+        fileElements.elements[container] = nativeReference
+
+        try subject.generateLinkingPhase(
+            target: target, pbxTarget: pbxTarget, pbxproj: pbxproj, fileElements: fileElements,
+            path: "/path", graphTraverser: graphTraverser
+        )
+
+        let phase = try XCTUnwrap(pbxTarget.buildPhases.first as? PBXFrameworksBuildPhase)
+        let files = try XCTUnwrap(phase.files)
+        XCTAssertEqual(files.map(\.file), [nativeReference])
+        XCTAssertEqual(files.map(\.settings), [nil])
+        XCTAssertEqual(pbxTarget.buildPhases.count, 1)
+    }
+
+
+    private func setupSliceSearchPaths(_ dependencies: [GraphDependencyReference], elements: XcodeprojElements) throws {
+        try subject.setupPlatformDependentFrameworkSearchPath(
+            target: .test(), pbxTarget: elements.pbxTarget, sourceRootPath: "/path", path: "/path",
+            searchablePathDependencies: dependencies,
+            sharedRoot: FrameworkSearchPathsGenerator.rootPath(workspacePath: "/path")
         )
     }
 

@@ -931,6 +931,78 @@ final class ProjectFileElementsTests: GekoUnitTestCase {
         XCTAssertEqual(frameworkElement?.path, frameworkPath.pathString)
         XCTAssertEqual(frameworkElement?.name, frameworkPath.basename)
     }
+    func test_generateDependencies_xcframeworkUsesNativeReferenceUnderContainerKey() throws {
+        let path: AbsolutePath = "/cache/builds/Container.xcframework"
+        let infoPlist = XCFrameworkInfoPlist.test(libraries: [
+            .test(identifier: "ios-arm64", path: try RelativePath(validating: "Product.framework/Product"),
+                  architectures: [.arm64]),
+            .test(identifier: "ios-simulator", path: try RelativePath(validating: "Product.framework"),
+                  architectures: [.arm64, .x8664], platformVariant: .simulator),
+        ])
+        let descriptor = try XCFrameworkReference(path: path, infoPlist: infoPlist, sourceRootPath: "/path")
+        let dependencies: Set<GraphDependencyReference> = [
+            .xcframework(path: path, infoPlist: infoPlist, primaryBinaryPath: path, binaryPath: path, status: .required),
+            .xcframework(path: path, infoPlist: infoPlist, primaryBinaryPath: path, binaryPath: path, status: .optional),
+        ]
+        try subject.generate(dependencyReferences: dependencies, groups: groups, pbxproj: pbxproj,
+                             sourceRootPath: "/path", filesGroup: .group(name: "Project"))
+
+        let reference = try XCTUnwrap(subject.file(path: path))
+        XCTAssertTrue(subject.elements[path] === reference)
+        XCTAssertEqual(reference.sourceTree, .absolute)
+        XCTAssertEqual(reference.path, "$(\(descriptor.settingName))")
+        XCTAssertEqual(reference.name, "Product.framework")
+        XCTAssertEqual(reference.lastKnownFileType, "wrapper.framework")
+        XCTAssertEqual(subject.xcframeworkBuildSettings, descriptor.settings)
+        XCTAssertEqual(pbxproj.fileReferences.count, 1)
+        XCTAssertFalse(pbxproj.fileReferences.contains { $0.lastKnownFileType == "wrapper.xcframework" })
+    }
+
+    func test_generateDependencies_conflictingXCFrameworkMetadataIsRejected() throws {
+        let path: AbsolutePath = "/cache/Container.xcframework"
+        for architectures in [[BinaryArchitecture.arm64], [.x8664]] {
+            let infoPlist = XCFrameworkInfoPlist.test(libraries: [
+                .test(identifier: "ios", path: try RelativePath(validating: "Product.framework"),
+                      architectures: architectures),
+            ])
+            let dependency = GraphDependencyReference.xcframework(
+                path: path, infoPlist: infoPlist, primaryBinaryPath: path, binaryPath: path, status: .required
+            )
+            if architectures == [.arm64] {
+                try subject.generate(dependencyReferences: [dependency], groups: groups, pbxproj: pbxproj,
+                                     sourceRootPath: "/path", filesGroup: .group(name: "Project"))
+            } else {
+                XCTAssertThrowsError(try subject.generate(
+                    dependencyReferences: [dependency], groups: groups, pbxproj: pbxproj,
+                    sourceRootPath: "/path", filesGroup: .group(name: "Project")
+                )) { error in
+                    guard case XCFrameworkReferenceError.conflictingDefinition(path) = error else {
+                        return XCTFail("Expected conflicting XCFramework definition, got \(error)")
+                    }
+                }
+            }
+        }
+        XCTAssertEqual(pbxproj.fileReferences.count, 1)
+    }
+
+    func test_generateDependencies_reusesAdditionalFileReferenceWithoutContainerType() throws {
+        let path: AbsolutePath = "/path/Container.xcframework"
+        try subject.generate(fileElement: .init(path: path, group: .group(name: "Project")),
+                             groups: groups, pbxproj: pbxproj, sourceRootPath: "/path")
+        let original = try XCTUnwrap(subject.file(path: path))
+        let infoPlist = XCFrameworkInfoPlist.test(libraries: [
+            .test(identifier: "ios", path: try RelativePath(validating: "Product.framework"), architectures: [.arm64]),
+        ])
+        try subject.generate(
+            dependencyReferences: [.xcframework(path: path, infoPlist: infoPlist, primaryBinaryPath: path,
+                                                binaryPath: path, status: .required)],
+            groups: groups, pbxproj: pbxproj, sourceRootPath: "/path", filesGroup: .group(name: "Project")
+        )
+        XCTAssertTrue(subject.file(path: path) === original)
+        XCTAssertEqual(original.lastKnownFileType, "wrapper.framework")
+        XCTAssertEqual(pbxproj.fileReferences.count, 1)
+    }
+
 }
 
 extension PBXGroup {

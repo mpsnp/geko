@@ -4577,6 +4577,40 @@ final class GraphTraverserTests: GekoUnitTestCase {
         ])
     }
 
+    func test_searchablePathDependencies_keepSameNamedTargetsAndIgnoredDependenciesIsolated() throws {
+        let consumer = Target.test(name: "Consumer", product: .framework)
+        let first = Project.test(path: "/first", targets: [consumer])
+        let second = Project.test(path: "/second", targets: [consumer])
+        let firstDependency = GraphDependency.target(name: consumer.name, path: first.path)
+        let secondDependency = GraphDependency.target(name: consumer.name, path: second.path)
+        let dynamicFramework = GraphDependency.testFramework(
+            path: "/cache/Dynamic.framework",
+            binaryPath: "/cache/Dynamic.framework/Dynamic",
+            linking: .dynamic
+        )
+        let staticXCFramework = GraphDependency.testXCFramework(path: "/cache/Static.xcframework", linking: .static)
+        let subject = GraphTraverser(graph: .test(
+            projects: [first.path: first, second.path: second],
+            targets: [first.path: [consumer.name: consumer], second.path: [consumer.name: consumer]],
+            dependencies: [
+                firstDependency: [dynamicFramework],
+                secondDependency: [dynamicFramework],
+                dynamicFramework: [staticXCFramework],
+            ],
+            ignoredDependencies: [secondDependency: [staticXCFramework]]
+        ))
+
+        let expected: Set<GraphDependencyReference> = [
+            GraphDependencyReference(dynamicFramework),
+            GraphDependencyReference(staticXCFramework),
+        ]
+        XCTAssertEqual(try subject.searchablePathDependencies(path: first.path, name: consumer.name), expected)
+        XCTAssertEqual(try subject.searchablePathDependencies(path: second.path, name: consumer.name), [
+            GraphDependencyReference(dynamicFramework),
+        ])
+        XCTAssertEqual(try subject.searchablePathDependencies(path: first.path, name: consumer.name), expected)
+    }
+
     func test_searchablePathDependencies_when_transitivePrecompiledStaticFrameworkLinkedByHostApp() throws {
         // Given
         let hostApp = Target.test(name: "App", product: .app)

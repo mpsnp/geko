@@ -22,6 +22,8 @@ public class GraphTraverser: GraphTraversing {
     private let linkableDependenciesMetrics = LinkableDependenciesMetrics()
     private var transitivePrecompiledDynamicDependenciesCache: [GraphDependency: Set<GraphDependency>] = [:]
     private let transitivePrecompiledDynamicDependenciesLock = NSLock()
+    private var searchablePathDependenciesCache: [GraphDependency: Set<GraphDependencyReference>] = [:]
+    private let searchablePathDependenciesLock = NSLock()
 
     private var conditionMapCalculated = false
     private var conditionMap: [GraphDependency: [GraphDependency: PlatformCondition.CombinationResult]] = [:]
@@ -494,6 +496,22 @@ public class GraphTraverser: GraphTraversing {
     }
 
     public func searchablePathDependencies(path: AbsolutePath, name: String) throws -> Set<GraphDependencyReference> {
+        let dependency = GraphDependency.target(name: name, path: path)
+        searchablePathDependenciesLock.lock()
+        if let cached = searchablePathDependenciesCache[dependency] {
+            searchablePathDependenciesLock.unlock()
+            return cached
+        }
+        searchablePathDependenciesLock.unlock()
+
+        let result = try computeSearchablePathDependencies(path: path, name: name)
+        searchablePathDependenciesLock.lock()
+        searchablePathDependenciesCache[dependency] = result
+        searchablePathDependenciesLock.unlock()
+        return result
+    }
+
+    private func computeSearchablePathDependencies(path: AbsolutePath, name: String) throws -> Set<GraphDependencyReference> {
         var deps = try linkableDependencies(
             path: path,
             name: name,

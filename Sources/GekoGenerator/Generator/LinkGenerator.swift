@@ -114,6 +114,17 @@ final class LinkGenerator: LinkGenerating {  // swiftlint:disable:this type_body
             graphTraverser: graphTraverser
         )
 
+        var symbolDependencies = try graphTraverser.linkableDependencies(path: path, name: target.name).filter {
+            guard case let .xcframework(_, _, _, _, status, _) = $0 else { return false }
+            return status != .none
+        }
+        symbolDependencies.formUnion(graphTraverser.embeddableFrameworks(path: path, name: target.name))
+        XCFrameworkSymbolsGenerator().generate(
+            dependencies: symbolDependencies,
+            pbxTarget: pbxTarget,
+            pbxproj: pbxproj
+        )
+
         /**
          Targets that depend on a Swift Macro have the following dependency graph:
 
@@ -141,13 +152,15 @@ final class LinkGenerator: LinkGenerating {  // swiftlint:disable:this type_body
     ) throws {
         let dependencies = try graphTraverser.searchablePathDependencies(path: path, name: target.name)
             .sorted()
+        let sharedRoot = FrameworkSearchPathsGenerator.rootPath(workspacePath: graphTraverser.path)
 
         try setupFrameworkSearchPath(
             target: target,
             pbxTarget: pbxTarget,
             sourceRootPath: sourceRootPath,
             path: path,
-            searchablePathDependencies: dependencies
+            searchablePathDependencies: dependencies,
+            sharedRoot: sharedRoot
         )
 
         try setupPlatformDependentFrameworkSearchPath(
@@ -155,7 +168,8 @@ final class LinkGenerator: LinkGenerating {  // swiftlint:disable:this type_body
             pbxTarget: pbxTarget,
             sourceRootPath: sourceRootPath,
             path: path,
-            searchablePathDependencies: dependencies
+            searchablePathDependencies: dependencies,
+            sharedRoot: sharedRoot
         )
 
         try setupHeadersSearchPath(
@@ -276,10 +290,22 @@ final class LinkGenerator: LinkGenerating {  // swiftlint:disable:this type_body
         pbxTarget: PBXTarget,
         sourceRootPath: AbsolutePath,
         path: AbsolutePath,
-        searchablePathDependencies: [GraphDependencyReference]
+        searchablePathDependencies: [GraphDependencyReference],
+        sharedRoot: AbsolutePath
     ) throws {
-        let precompiledPaths = searchablePathDependencies.compactMap { $0.precompiledPath }
-            .map { LinkGeneratorPath.absolutePath($0.removingLastComponent()) }
+        let precompiledPaths = searchablePathDependencies.compactMap { dependency -> LinkGeneratorPath? in
+            guard let precompiledPath = dependency.precompiledPath else { return nil }
+            switch dependency {
+            case .framework:
+                return .absolutePath(sharedRoot)
+            case .xcframework:
+                // Framework slices use SDK-specific paths below, not the bundle's parent.
+                return nil
+            default:
+                break
+            }
+            return .absolutePath(precompiledPath.parentDirectory)
+        }
         let sdkPaths = searchablePathDependencies.compactMap { (dependency: GraphDependencyReference) -> LinkGeneratorPath? in
             if case let GraphDependencyReference.sdk(_, _, source, _) = dependency {
                 return source.frameworkSearchPath.map { LinkGeneratorPath.string($0) }
@@ -302,52 +328,119 @@ final class LinkGenerator: LinkGenerating {  // swiftlint:disable:this type_body
         pbxTarget: PBXTarget,
         sourceRootPath: AbsolutePath,
         path: AbsolutePath,
-        searchablePathDependencies: [GraphDependencyReference]
+        searchablePathDependencies: [GraphDependencyReference],
+        sharedRoot: AbsolutePath
     ) throws {
-        var frameworkSearchPaths: [String: [LinkGeneratorPath]] = [:]
-        var librarySearchPaths: [String: [LinkGeneratorPath]] = [:]
+        // The empty architecture key contains paths common to every architecture.
+        var frameworkSearchPaths: [String: [String: [LinkGeneratorPath]]] = [:]
+        var librarySearchPaths: [String: [String: [LinkGeneratorPath]]] = [:]
+        var hasCatalystLibraries = false
 
         for dependency in searchablePathDependencies {
-            guard case let .xcframework(xcframeworkPath, plist, _, _, _, _) = dependency else {
-                continue
-            }
-
-            let xcframeworkPlatforms = plist.searchPathPlatforms
-            for platform in xcframeworkPlatforms.keys {
-                let binaryPath = xcframeworkPath.appending(xcframeworkPlatforms[platform]!)
-                let linkGeneratorPath = binaryPath.parentDirectory
+            guard case let .xcframework(xcframeworkPath, plist, _, _, _, _) = dependency else { continue }
+            for slice in try FrameworkSearchPathsGenerator.sliceSearchPaths(infoPlist: plist) {
+                let binaryPath = xcframeworkPath.appending(slice.libraryPath)
+                let architecture = slice.architecture ?? ""
+                hasCatalystLibraries = hasCatalystLibraries || slice.sdk == "maccatalyst"
                 if binaryPath.extension == "a" {
-                    librarySearchPaths[platform, default: []].append(.absolutePath(linkGeneratorPath))
+                    librarySearchPaths[slice.sdk, default: [:]][architecture, default: []]
+                        .append(.absolutePath(binaryPath.parentDirectory))
+                } else if binaryPath.extension == "framework" || binaryPath.parentDirectory.extension == "framework" {
+                    let sdkRoot = sharedRoot.appending(component: slice.sdk)
+                    frameworkSearchPaths[slice.sdk, default: [:]]["", default: []].append(.absolutePath(sdkRoot))
+                    if let architecture = slice.architecture {
+                        frameworkSearchPaths[slice.sdk, default: [:]][architecture, default: []]
+                            .append(.absolutePath(sdkRoot.appending(component: architecture)))
+                    }
                 } else {
-                    frameworkSearchPaths[platform, default: []].append(.absolutePath(linkGeneratorPath))
+                    frameworkSearchPaths[slice.sdk, default: [:]][architecture, default: []]
+                        .append(.absolutePath(binaryPath.parentDirectory))
                 }
             }
         }
 
-        for platform in frameworkSearchPaths.keys {
-            let uniquePaths = Array(Set(frameworkSearchPaths[platform]!))
-            try setup(
-                setting: "FRAMEWORK_SEARCH_PATHS[sdk=\(platform)*]",
-                paths: uniquePaths,
+        try setupPlatformSearchPaths(
+            setting: "FRAMEWORK_SEARCH_PATHS",
+            pathsByPlatform: frameworkSearchPaths,
+            hasCatalystLibraries: hasCatalystLibraries,
+            pbxTarget: pbxTarget,
+            sourceRootPath: sourceRootPath
+        )
+        for setting in ["LIBRARY_SEARCH_PATHS", "SWIFT_INCLUDE_PATHS"] {
+            try setupPlatformSearchPaths(
+                setting: setting,
+                pathsByPlatform: librarySearchPaths,
+                hasCatalystLibraries: hasCatalystLibraries,
                 pbxTarget: pbxTarget,
                 sourceRootPath: sourceRootPath
             )
         }
+    }
 
-        for platform in librarySearchPaths.keys {
-            let uniquePaths = Array(Set(librarySearchPaths[platform]!))
-            try setup(
-                setting: "LIBRARY_SEARCH_PATHS[sdk=\(platform)*]",
-                paths: uniquePaths,
-                pbxTarget: pbxTarget,
-                sourceRootPath: sourceRootPath
-            )
-            try setup(
-                setting: "SWIFT_INCLUDE_PATHS[sdk=\(platform)*]",
-                paths: uniquePaths,
-                pbxTarget: pbxTarget,
-                sourceRootPath: sourceRootPath
-            )
+    private func setupPlatformSearchPaths(
+        setting: String,
+        pathsByPlatform: [String: [String: [LinkGeneratorPath]]],
+        hasCatalystLibraries: Bool,
+        pbxTarget: PBXTarget,
+        sourceRootPath: AbsolutePath
+    ) throws {
+        guard !pathsByPlatform.isEmpty else { return }
+        guard let configurationList = pbxTarget.buildConfigurationList else {
+            throw LinkGeneratorError.missingConfigurationList(targetName: pbxTarget.name)
+        }
+        var sdks = Set(pathsByPlatform.keys)
+        if sdks.remove("maccatalyst") != nil { sdks.insert("macosx") }
+        for sdk in sdks.sorted() {
+            let usesCatalystSelector = sdk == "macosx" && hasCatalystLibraries
+            let variants = usesCatalystSelector ? [("NO", "macosx"), ("YES", "maccatalyst")] : [("", sdk)]
+            let architectures = Set(variants.flatMap { Array((pathsByPlatform[$0.1] ?? [:]).keys) })
+                .subtracting([""]).sorted()
+            let baseSetting = "\(setting)[sdk=\(sdk)*]"
+            let customSDKSettings = configurationList.buildConfigurations.map { $0.buildSettings[baseSetting] }
+            for architecture in [""] + architectures {
+                let condition = "[sdk=\(sdk)*]" + (architecture.isEmpty ? "" : "[arch=\(architecture)]")
+                let paths: [LinkGeneratorPath]
+                if usesCatalystSelector {
+                    let selector = "GEKO_\(setting)_MACOS"
+                    for (variant, platform) in variants {
+                        let common = pathsByPlatform[platform]?[""] ?? []
+                        let specific = architecture.isEmpty ? [] : pathsByPlatform[platform]?[architecture] ?? []
+                        let values = Set((common + specific).map { $0.xcodeValue(sourceRootPath: sourceRootPath) }).sorted()
+                        let key = "\(selector)_\(variant)" + (architecture.isEmpty ? "" : condition)
+                        for configuration in configurationList.buildConfigurations {
+                            configuration.buildSettings[key] = .array(values)
+                        }
+                    }
+                    paths = [.string("$(\(selector)_$(IS_MACCATALYST))")]
+                } else {
+                    let common = pathsByPlatform[sdk]?[""] ?? []
+                    let specific = architecture.isEmpty ? [] : pathsByPlatform[sdk]?[architecture] ?? []
+                    paths = Array(Set(common + specific))
+                }
+                try setup(
+                    setting: "\(setting)\(condition)",
+                    paths: paths,
+                    pbxTarget: pbxTarget,
+                    sourceRootPath: sourceRootPath
+                )
+                // An arch-qualified setting replaces its SDK-only sibling at this level.
+                // Carry its custom values explicitly, in addition to normal inheritance.
+                if !architecture.isEmpty {
+                    let helper = SettingsHelper()
+                    for (configuration, custom) in zip(configurationList.buildConfigurations, customSDKSettings) {
+                        guard let custom else { continue }
+                        let values: [String]
+                        switch custom {
+                        case let .string(value): values = [value]
+                        case let .array(value): values = value
+                        }
+                        helper.extend(
+                            buildSettings: &configuration.buildSettings,
+                            with: ["\(setting)\(condition)": .array(["$(inherited)"] + values)]
+                        )
+                    }
+                }
+            }
         }
     }
 
@@ -704,49 +797,6 @@ final class LinkGenerator: LinkGenerating {  // swiftlint:disable:this type_body
             dstPath: nil,
             dstSubfolderSpec: .productsDirectory,
             name: "Dependencies",
-            buildActionMask: 8,
-            files: files,
-            runOnlyForDeploymentPostprocessing: true
-        )
-
-        pbxproj.add(object: buildPhase)
-        pbxTarget.buildPhases.append(buildPhase)
-    }
-
-    private func generateStaticXCFrameworksDependenciesBuildPhase(
-        dependencies: [GraphDependencyReference],
-        pbxTarget: PBXTarget,
-        pbxproj: PBXProj,
-        target: Target,
-        fileElements: ProjectFileElements
-    ) throws {
-        var files: [PBXBuildFile] = []
-
-        for dependency in dependencies.sorted() {
-            switch dependency {
-            case let .xcframework(path: path, _, _, _, _, condition):
-                guard let fileRef = fileElements.file(path: path) else {
-                    throw LinkGeneratorError.missingReference(path: path)
-                }
-                let buildFile = PBXBuildFile(file: fileRef)
-                buildFile.applyCondition(condition, applicableTo: target)
-                pbxproj.add(object: buildFile)
-                files.append(buildFile)
-            default:
-                break
-            }
-        }
-
-        if files.isEmpty {
-            return
-        }
-
-        // Need a unique (but stable) destination path per target
-        // to avoid "multiple commands produce:" errors in Xcode
-        let buildPhase = PBXCopyFilesBuildPhase(
-            dstPath: "_StaticXCFrameworkDependencies/\(target.name)",
-            dstSubfolderSpec: .productsDirectory,
-            name: "Static XCFramework Dependencies",
             buildActionMask: 8,
             files: files,
             runOnlyForDeploymentPostprocessing: true

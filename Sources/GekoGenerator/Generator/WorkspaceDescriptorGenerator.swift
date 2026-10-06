@@ -110,6 +110,8 @@ final class WorkspaceDescriptorGenerator: WorkspaceDescriptorGenerating {
         logger.debug(
             "Project descriptor generation took: \(String(format: "%.6f", projectGenerationSeconds))s"
         )
+        // Project generation has already populated the per-target search dependency cache in parallel.
+        try FrameworkSearchPathsGenerator().generate(graphTraverser: graphTraverser)
         graphTraverser.logLinkableDependenciesMetrics()
 
         logger.info("\nGenerating cross project links", metadata: .subsection)

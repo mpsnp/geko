@@ -42,6 +42,26 @@ let config = Config(
 > [!NOTE]
 > Geko supports building caches for multiple platforms simultaneously. In this case, you'll use xcframeworks instead of frameworks. However, using multiple platforms can significantly impact warm-up time. Therefore, we recommend separating different platforms into different profiles.
 
+### Shared framework search paths
+
+During workspace generation, Geko indexes searchable precompiled frameworks from the current dependency graph in `<workspace-root>/.geko/FrameworkSearchPaths`. This is not an index of every historical artifact in the build cache.
+
+Searchable dependency results are cached by project path and target name for the lifetime of the graph traverser. The shared index is generated after parallel project generation and reuses those results, preserving dependency conditions, ignored dependencies, and test-host dependencies without a second transitive graph traversal.
+
+Standalone `.framework` bundles are symlinked directly into this directory. Framework slices inside XCFrameworks are symlinked into platform-specific subdirectories, such as `iphoneos`, `iphonesimulator`, `macosx`, and `maccatalyst`. When a platform has separate architecture slices, these use additional architecture subdirectories. Links use the actual framework product name, which may differ from the target or XCFramework name. Generated framework, library, and Swift include search paths select the matching SDK, architecture, and Catalyst variant.
+
+The generated `.manifest.json` tracks owned links. Subsequent generation updates changed destinations and removes stale owned links without replacing unrelated files or user-modified links. Distinct artifacts with the same framework name in the same platform/architecture namespace cause generation to fail. A standalone framework cannot shadow a different platform-specific framework with the same name.
+
+Shared search paths expose frameworks from other targets in the same namespace, but declared linking and embedding dependencies remain target-specific. Cache artifacts and cache hashing are unchanged.
+
+### Native XCFramework slice references
+
+Generated Xcode projects reference the framework, static archive, or dynamic library inside an XCFramework instead of the XCFramework container. Project-level `GEKO_XCFRAMEWORK_<digest>` build settings select the native product path by SDK and, where needed, architecture. macOS and Mac Catalyst are selected independently using `IS_MACCATALYST`. The generated project therefore remains usable for different build destinations without regenerating it.
+
+Native references retain dependency platform conditions and required, weak, or disabled linking status. Dynamic frameworks use native embedding phases. Optional XCFramework dSYM and bitcode symbol-map directories are selected by the same destination settings and copied by a dedicated symbols phase; that phase runs only for targets consuming symbol-bearing dependencies and is always out of date because symbol directories can be absent for a destination. Ambiguous or inconsistent slice metadata fails generation rather than selecting an arbitrary library.
+
+This removes XCFramework container references from linking and embedding and avoids the corresponding `ProcessXCFramework` work. It does not reduce the number of declared target dependencies, and destination-selection settings can increase project-file size.
+
 ## Remote Cache 
 
 Geko makes it very easy to set up your own remote cache. To do this, you need to set up your own S3 server using AWS or use any other S3 API-compatible service.

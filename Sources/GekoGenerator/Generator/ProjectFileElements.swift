@@ -68,6 +68,9 @@ class ProjectFileElements {
     var compiled: [AbsolutePath: PBXFileReference] = [:]
     var buildableFolders: [AbsolutePath: PBXFileSystemSynchronizedRootGroup] = [:]
     var knownRegions: Set<String> = Set([])
+    private(set) var xcframeworkBuildSettings: [String: SettingValue] = [:]
+    private var xcframeworkReferences: [AbsolutePath: XCFrameworkReference] = [:]
+    private var xcframeworkInfoPlists: [AbsolutePath: XCFrameworkInfoPlist] = [:]
 
     // MARK: - Init
 
@@ -301,12 +304,12 @@ class ProjectFileElements {
                     group: filesGroup,
                     sourceRootPath: sourceRootPath
                 )
-            case let .xcframework(path, _, _, _, _, _):
-                try generatePrecompiledDependency(
+            case let .xcframework(path, infoPlist, _, _, _, _):
+                try generateXCFramework(
                     path,
+                    infoPlist: infoPlist,
                     groups: groups,
                     pbxproj: pbxproj,
-                    group: filesGroup,
                     sourceRootPath: sourceRootPath
                 )
             case let .framework(path, _, _, _, _, _, _, _, _):
@@ -383,6 +386,53 @@ class ProjectFileElements {
                 sourceRootPath: sourceRootPath
             )
         }
+    }
+
+    private func generateXCFramework(
+        _ path: AbsolutePath,
+        infoPlist: XCFrameworkInfoPlist,
+        groups: ProjectGroups,
+        pbxproj: PBXProj,
+        sourceRootPath: AbsolutePath
+    ) throws {
+        let descriptor = try XCFrameworkReference(path: path, infoPlist: infoPlist, sourceRootPath: sourceRootPath)
+        if let existing = xcframeworkReferences[path] {
+            guard existing == descriptor,
+                  let existingInfoPlist = xcframeworkInfoPlists[path],
+                  Set(existingInfoPlist.libraries) == Set(infoPlist.libraries)
+            else {
+                throw XCFrameworkReferenceError.conflictingDefinition(path)
+            }
+            return
+        }
+        for key in descriptor.settings.keys.sorted() {
+            if let existing = xcframeworkBuildSettings[key], existing != descriptor.settings[key] {
+                throw XCFrameworkReferenceError.conflictingBuildSetting(key)
+            }
+        }
+        let reference: PBXFileReference
+        if let existing = elements[path] as? PBXFileReference {
+            reference = existing
+            reference.sourceTree = .absolute
+            reference.name = descriptor.name
+            reference.path = "$(\(descriptor.settingName))"
+            reference.lastKnownFileType = descriptor.fileType
+            reference.explicitFileType = nil
+        } else {
+            reference = PBXFileReference(
+                sourceTree: .absolute,
+                name: descriptor.name,
+                lastKnownFileType: descriptor.fileType,
+                path: "$(\(descriptor.settingName))"
+            )
+            pbxproj.add(object: reference)
+            groups.frameworks.children.append(reference)
+        }
+        // Link and embed phases keep using the container's logical graph key.
+        elements[path] = reference
+        xcframeworkReferences[path] = descriptor
+        xcframeworkInfoPlists[path] = infoPlist
+        xcframeworkBuildSettings.merge(descriptor.settings, uniquingKeysWith: { existing, _ in existing })
     }
 
     func generatePrecompiledDependency(
